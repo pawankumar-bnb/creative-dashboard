@@ -226,7 +226,7 @@ svg { display: block; }
 .nav-item .badge { margin-left: auto; }
 .nav-spacer { flex: 1; }
 .nav-foot { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 6px; }
-.rail .brand-name, .rail .brand-sub, .rail .nav-item span, .rail .nav-section { display: none; }
+.rail .nav .brand-name, .rail .nav .brand-sub, .rail .nav-item span, .rail .nav-section { display: none; }
 .rail .nav-item { justify-content: center; padding: 10px; }
 .rail .nav-item .badge { position: absolute; top: 4px; right: 4px; margin: 0; }
 
@@ -619,8 +619,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 }
 @media (max-width: 1023px) {
   .app, .app.rail { grid-template-columns: var(--nav-rail) 1fr; }
-  .brand-name, .brand-sub, .nav-item span, .nav-section { display: none; }
-  .nav-item { justify-content: center; padding: 10px; }
+  .nav .brand-name, .nav .brand-sub, .nav .nav-item span, .nav .nav-section { display: none; }
+  .nav .nav-item { justify-content: center; padding: 10px; }
   .nav-item .badge { position: absolute; top: 4px; right: 4px; margin: 0; }
 }
 @media (max-width: 767px) {
