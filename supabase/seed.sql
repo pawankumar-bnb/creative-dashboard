@@ -29,5 +29,9 @@ insert into public.docs (collection, id, data) values
   ('requests', 'BB-0008', '{"sample":true,"priority":"Normal","refs":[],"deliverables":[],"thread":[],"assignees":{},"round":1,"status":"open","num":8,"title":"CRM onboarding drip — email headers (5)","typeId":"crm","type":"CRM creatives","team":"design","request":"Header images for the 5-email onboarding drip for new customers.","brief":"","dueDate":"2026-09-19","requester":{"name":"Siddharth","sample":true},"createdAt":1789297019357,"stage":"brief","tatHours":72,"visits":[{"stage":"intake","enteredAt":1789297019357,"exitedAt":1789297019357,"by":{"name":"Siddharth","sample":true},"action":"submitted","round":1},{"stage":"brief","enteredAt":1789297019357,"exitedAt":null,"round":1}],"updatedAt":1789297019357}'::jsonb)
 on conflict (collection, id) do nothing;
 
+-- lock the helper functions to signed-in users (idempotent)
+revoke execute on function public.next_task_number() from public, anon;
+grant execute on function public.next_task_number() to authenticated;
+
 -- task numbers continue after the samples
 select setval('public.task_number_seq', greatest((select coalesce(max((data->>'num')::int), 0) from public.docs where collection = 'requests'), 1));

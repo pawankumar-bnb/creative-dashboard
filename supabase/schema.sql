@@ -54,7 +54,10 @@ create or replace function public.next_task_number() returns integer
 language sql security definer set search_path = public as $$
   select nextval('public.task_number_seq')::integer;
 $$;
+revoke execute on function public.next_task_number() from public, anon;
 grant execute on function public.next_task_number() to authenticated;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
 
 -- ---------- row-level security ----------
 drop policy if exists "signed-in users read everything"      on public.docs;
