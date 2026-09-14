@@ -4,7 +4,7 @@ window.RELAY_CONFIG = {
   // Clerk (identity): dashboard.clerk.com → Configure → API keys → Publishable key
   clerkPublishableKey: 'pk_test_ZmFtb3VzLXdlYXNlbC05NTk0LmNsZXJrLmFjY291bnRzLmRldiQ',
   // Supabase (shared database): Project Settings → API → Project URL, e.g. https://abcdefghijklmnop.supabase.co
-  supabaseUrl: '',
+  supabaseUrl: 'https://rrnluvyammmlfjhtczod.supabase.co',
   // Supabase publishable / anon key
   supabaseKey: 'sb_publishable_klvoSJdP5MQR_cJXNrwk_g_nG6eP8yN',
 };
