@@ -466,8 +466,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tip .t-row i { width: 10px; height: 3px; border-radius: 2px; background: var(--c); }
 .tip .t-row b { font-weight: 600; }
 .tip .t-row span { opacity: .8; }
-.bullet-row { display: grid; grid-template-columns: 84px 1fr 112px; align-items: center; gap: 12px; padding: 7px 0; }
-.bullet-row .b-label { font-size: 13px; font-weight: 500; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.bullet-row { display: grid; grid-template-columns: 104px 1fr 112px; align-items: center; gap: 12px; padding: 7px 0; }
+.bullet-row .b-label { font-size: 12.5px; line-height: 1.2; font-weight: 500; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
 .bullet-row .b-label i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
 .bullet-track { position: relative; height: 22px; background: var(--surface-2); border-radius: 4px; overflow: visible; }
 .bullet-track .fill { position: absolute; left: 0; top: 4px; bottom: 4px; width: 0; background: var(--series-1); border-radius: 0 4px 4px 0; transition: width .7s var(--ease-out); }

@@ -1,6 +1,6 @@
 # creative-dashboard — working notes for Claude
 
-**What this is:** Relay, Brick&Bolt's creative-ops relay (Marketing → Content → Creative → Review → Approved) with per-stage TAT and SLA breach flags. Plain HTML/CSS/JS, no build step. See README.md for the full description.
+**What this is:** Relay, Brick&Bolt's creative-ops relay (Requested → Brief & assign by the coordinator → In production by design/video → QC → Final approval by requester-or-admin → Approved) with per-task TAT set by the coordinator, per-stage SLAs, breach flags, and the assignee's TAT stored on approval. Plain HTML/CSS/JS, no build step. See README.md for the full description.
 
 ## Deployment rules (set by Pawan)
 
@@ -10,6 +10,6 @@
 ## Data model reminders
 
 - Artifact viewer → `DbStore` (shared realtime `db`). Static hosting → `LocalStore` (per-browser demo mode) until a real backend adapter exists.
-- `pawankumar@bricknbolt.com` is the always-admin owner (`APP.ownerEmail` in app.js). Sign-in is a roster check, not auth.
-- Flow/settings live in the `config` collection (`flow`, `settings`, `counter`); people in `members` (doc id = lower-cased email); requests in `requests` (doc id = display id like `BB-0001`). Stage timing = `visits[]` on each request; TAT is computed from timestamps at read time (respects the working-hours setting).
-- Stage colours were validated for colour-vision safety with the dataviz palette validator — keep the aqua/violet/orange set unless re-validated.
+- `pawankumar@bricknbolt.com` is the always-admin owner (`APP.ownerEmail` in app.js). Sign-in is a roster check, not auth; allowed domains self-register as Requester.
+- Flow/settings live in the `config` collection (`flow`, `settings`, `counter`); people in `members` (doc id = lower-cased email); requests in `requests` (doc id = task id like `BB-0001`). Stage timing = `visits[]`; the work stage uses `slaFrom:'task'` → the request's `tatHours`; `result{}` is written by `finalizeResult()` when a request enters the end stage. Stage kinds: start / triage / work / review / end; review stages carry `reviewers` (`requester`, `role:<id>`).
+- Stage colours (aqua #1baf7a, violet #4a3aa7, orange #eb6834, blue #2a78d6, with dark steps in `DARK_COLORS`) were validated for colour-vision safety with the dataviz palette validator — re-validate before changing.

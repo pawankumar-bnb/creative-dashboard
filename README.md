@@ -1,17 +1,20 @@
 # Relay — Creative Ops for Brick&Bolt
 
-A workflow app that moves marketing requirements through the team as a relay:
+A workflow app that moves the branding team's requests through a relay:
 
 ```
-Requirement → Content → Creative → Review → Approved
-   (Marketing)   (Content)  (Creative)  (Marketing)
+Requested → Brief & assign → In production → QC → Final approval → Approved
+ (anyone)    (coordinator)   (design/video)  (coord.)  (requester or admin)
 ```
 
-- **Roles** — Marketing raises and approves, Content and Creative own their stages, Admin manages the team, the flow and settings.
-- **Handoffs** — claim or assign a stage, mark it done, Creative must attach the final file link, the requester approves or requests edits (which loops back as a new round).
-- **TAT & SLA** — every stage visit is timed; SLA meters go amber at 75% and red when breached, with breach flags on cards, columns, the queue and the dashboard. Optional working-hours clock.
-- **Dashboard** — open requests, waiting-on-you, SLA breaches, average end-to-end TAT, on-time %, WIP by stage, turnaround vs SLA per stage, weekly throughput, activity feed, CSV export.
-- **Configurable flow** — admins can rename, reorder, add and remove stages, set owner roles, SLA hours and edit-loop targets without touching code.
+1. **Anyone with a @bricknbolt.com email** signs in and raises a request (type, priority, needed-by, details).
+2. **Every request goes to the coordinator (Sakshi)**, who confirms the details with the requester, writes the creative brief, picks the graphic-design or video person, and **sets the TAT** for that task. The task ID (e.g. `BB-0012`) is minted at submission.
+3. **The assignee** sees the task in *My queue* with its TAT deadline, attaches the final file link and submits it.
+4. **QC by the coordinator** — approve, or send back for rework (a new round).
+5. **Final approval** — the requester *or* an admin (Pawan), whichever acts first. Changes go back to production.
+6. On final approval the **assignee's production TAT** (actual vs target, rounds, on-time) is stored on the task and rolls up into the *Team turnaround* table.
+
+Every stage is timed against its limit (coordinator SLA 24h, QC 24h, final approval 24h, production = per-task TAT); breaches are flagged on cards, columns, the queue and the dashboard. Request types and their default TATs come from the team's tracker and are editable in Settings; the flow itself is editable by admins.
 
 **Live site:** https://pawankumar-bnb.github.io/creative-dashboard/ — every push to `main` redeploys it (see `.github/workflows/deploy.yml`).
 
@@ -22,7 +25,7 @@ Requirement → Content → Creative → Review → Approved
 | `index.html` | Page shell (fonts, GSAP from cdnjs, app scripts) |
 | `app.css` | Design tokens (light + dark), layout, components, motion |
 | `app.js` | All application logic: stores, permissions, actions, metrics, views, charts, routing |
-| `samples.js` | Sample requests (marked `sample`) for demo mode and first-run seeding |
+| `samples.js` | Sample requests (marked `sample`) and the team roster for demo mode and first-run seeding |
 | `scripts/build-artifact.mjs` | Builds `dist/artifact.html` for the claude.ai Artifact viewer |
 | `.github/workflows/deploy.yml` | GitHub Pages deployment on push to `main` |
 
@@ -41,7 +44,7 @@ To make the public site multi-user, add a third adapter with the same five metho
 
 ## Sign-in model
 
-Sign-in is a roster check: an admin adds a teammate's work email under **Team**, and that person signs in with it. It is not a password. On the artifact, the real access gate is the artifact's share list; on a public host it needs real authentication (see above).
+Sign-in is a roster check: any email on an allowed domain (Settings → Who can sign in) self-registers as a Requester; admins give people the Coordinator / Graphic design / Video editing / Admin roles under **Team**. It is not a password. On the artifact, the real access gate is the artifact's share list; on a public host it needs real authentication (see above).
 
 The workspace owner, `pawankumar@bricknbolt.com`, is always treated as an admin so the team can never lock itself out.
 
