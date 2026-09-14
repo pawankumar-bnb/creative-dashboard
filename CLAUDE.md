@@ -7,6 +7,12 @@
 - **Every change gets committed and pushed to `main` on `pawankumar-bnb/creative-dashboard` directly** — the GitHub Pages workflow (`.github/workflows/deploy.yml`) redeploys the live site on push: https://pawankumar-bnb.github.io/creative-dashboard/
 - Keep the claude.ai Artifact in step when app files change: `node scripts/build-artifact.mjs`, then publish `dist/artifact.html` + `app.css` + `app.js` + `samples.js` to https://claude.ai/code/artifact/cdd21a37-4c21-4689-b76f-5eecd33bbad2 (capabilities `db` + `downloads`; omit `capabilities` on a redeploy to keep them).
 
+## Auth & storage
+
+- Website: Clerk (publishable key in `config.js`, ClerkJS loaded from the instance domain encoded in the key) + Supabase `docs` table via `SupabaseStore`. Artifact: roster gate + artifact db. Local/static: roster gate + localStorage.
+- Supabase RLS needs the Clerk session token to carry `role: authenticated` (Clerk Supabase integration) and an `email` claim (session token customization). `supabase/schema.sql` is the source of truth for policies; `supabase/seed.sql` is generated from the app defaults + samples (regenerate with the node snippet in git history if defaults change).
+- Clerk can't run inside the artifact (CSP), so `scripts/build-artifact.mjs` strips the `<!-- site:start -->…<!-- site:end -->` block.
+
 ## Data model reminders
 
 - Artifact viewer → `DbStore` (shared realtime `db`). Static hosting → `LocalStore` (per-browser demo mode) until a real backend adapter exists.

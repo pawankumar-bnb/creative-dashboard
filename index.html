@@ -30,6 +30,25 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/Flip.min.js"></script>
+<!-- site:start — real sign-in (Clerk) and the shared database (Supabase); stripped from the claude.ai artifact build -->
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+  // Load ClerkJS from the instance's own domain (encoded in the publishable key) so it always matches the key.
+  (function () {
+    var cfg = window.RELAY_CONFIG || {}; var key = cfg.clerkPublishableKey;
+    if (!key || (window.claude && typeof window.claude.use === 'function')) return;
+    try {
+      var frontendApi = atob(key.replace(/^pk_(test|live)_/, '')).replace(/\$$/, '');
+      var s = document.createElement('script'); s.async = true; s.crossOrigin = 'anonymous';
+      s.setAttribute('data-clerk-publishable-key', key);
+      s.src = 'https://' + frontendApi + '/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+      s.onerror = function () { window.__clerkLoadFailed = true; };
+      document.head.appendChild(s);
+    } catch (e) { window.__clerkLoadFailed = true; }
+  })();
+</script>
+<!-- site:end -->
 <script src="samples.js"></script>
 <script src="app.js"></script>
 <!-- artifact:end -->

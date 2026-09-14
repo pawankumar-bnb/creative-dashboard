@@ -10,6 +10,8 @@
 
 /* ---------------- constants ---------------- */
 const APP = { name: 'Relay', ownerEmail: 'pawankumar@bricknbolt.com', ownerName: 'Pawan Kumar' };
+const CFG = window.RELAY_CONFIG || {};
+const inArtifact = () => !!(window.claude && typeof window.claude.use === 'function');
 const LS = { me: 'relay.me', boardMode: 'relay.boardMode', local: 'relay.local.v2' };
 const H = 3600e3, D = 24 * H, MIN = 60e3;
 
@@ -87,7 +89,7 @@ function whoHtml(p, size = 'sm', emptyText = 'Unassigned') {
   if (!p) return `<span class="who">${personHtml(null, size)}<span class="name muted">${esc(emptyText)}</span></span>`;
   return `<span class="who">${personHtml(p, size)}<span class="name">${esc(p.name)}</span></span>`;
 }
-const pick = (p) => p ? { email: p.email || null, name: p.name, ...(p.sample ? { sample: true } : {}) } : null;
+const pick = (p) => p ? { email: p.email || null, name: p.name, ...(p.authId ? { authId: p.authId } : {}), ...(p.sample ? { sample: true } : {}) } : null;
 const firstName = (p) => (p && p.name ? p.name.split(' ')[0] : '');
 
 /* ---------------- time ---------------- */
@@ -258,6 +260,46 @@ class DbStore {
     return maxExisting + 1;
   }
 }
+/* Supabase-backed store: one `docs` table (collection, id, data) with row-level security
+   keyed on the Clerk session token. Realtime keeps every open tab in sync; if the
+   realtime channel cannot connect it falls back to polling. */
+class SupabaseStore {
+  constructor(client) { this.sb = client; this.cache = {}; this.subs = {}; this.loaded = {}; this.channel = null; this.poll = null; }
+  list(col) { return Object.values(this.cache[col] || {}); }
+  emit(col) { (this.subs[col] || []).forEach((cb) => cb(this.list(col))); }
+  async load(col) {
+    const { data, error } = await this.sb.from('docs').select('id,data').eq('collection', col);
+    if (error) throw { code: error.code === '42501' ? 'not_granted' : 'unavailable', message: error.message };
+    const map = {}; (data || []).forEach((row) => { map[row.id] = { ...(row.data || {}), id: row.id }; });
+    this.cache[col] = map; this.loaded[col] = true; this.emit(col);
+  }
+  subscribe(col, cb, onErr) {
+    (this.subs[col] ||= []).push(cb);
+    this.load(col).catch((e) => onErr && onErr(e));
+    this.ensureRealtime();
+    return () => { this.subs[col] = (this.subs[col] || []).filter((f) => f !== cb); };
+  }
+  ensureRealtime() {
+    if (this.channel) return;
+    const apply = (payload) => {
+      const row = payload.new && payload.new.collection ? payload.new : payload.old; if (!row || !row.collection) { this.refreshAll(); return; }
+      const col = row.collection; this.cache[col] ||= {};
+      if (payload.eventType === 'DELETE') delete this.cache[col][row.id]; else this.cache[col][row.id] = { ...(row.data || {}), id: row.id };
+      this.emit(col);
+    };
+    this.channel = this.sb.channel('docs-live').on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, apply)
+      .subscribe((status) => { if (status === 'SUBSCRIBED') { if (this.poll) { clearInterval(this.poll); this.poll = null; } this.refreshAll(); } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { if (!this.poll) this.poll = setInterval(() => this.refreshAll(), 30000); } });
+  }
+  refreshAll() { Object.keys(this.subs).forEach((col) => { if (this.subs[col].length) this.load(col).catch(() => {}); }); }
+  async get(col, id) { const { data, error } = await this.sb.from('docs').select('id,data').eq('collection', col).eq('id', id).maybeSingle(); if (error) throw { code: 'unavailable', message: error.message }; return data ? { ...(data.data || {}), id: data.id } : null; }
+  async set(col, id, doc) { const body = stripId(doc); const { error } = await this.sb.from('docs').upsert({ collection: col, id, data: body }, { onConflict: 'collection,id' }); if (error) throw this.err(error); (this.cache[col] ||= {})[id] = { ...body, id }; this.emit(col); }
+  async update(col, id, patch) { const cur = (this.cache[col] || {})[id] || await this.get(col, id); if (!cur) throw { code: 'invalid_argument', message: 'missing' }; await this.set(col, id, { ...cur, ...stripId(patch) }); }
+  async del(col, id) { const { error } = await this.sb.from('docs').delete().eq('collection', col).eq('id', id); if (error) throw this.err(error); if (this.cache[col]) delete this.cache[col][id]; this.emit(col); }
+  async add(col, doc) { const id = uid(); await this.set(col, id, doc); return id; }
+  async nextNumber(maxExisting) { try { const { data, error } = await this.sb.rpc('next_task_number'); if (!error && data) return Math.max(Number(data), maxExisting + 1); } catch (e) { /* fall through */ } return maxExisting + 1; }
+  err(error) { const code = error && (error.code === '42501' || /row-level security/i.test(error.message || '')) ? 'not_granted' : 'unavailable'; return { code, message: error ? error.message : 'unknown' }; }
+  dispose() { if (this.channel) { try { this.sb.removeChannel(this.channel); } catch (e) { /* ignore */ } this.channel = null; } if (this.poll) clearInterval(this.poll); this.cache = {}; this.subs = {}; }
+}
 function stripId(doc) { const d = clone(doc); delete d.id; return d; }
 
 /* ---------------- state ---------------- */
@@ -269,6 +311,7 @@ const S = {
   q: '', filters: { type: '', prio: '', team: '', mine: false, breached: false, stage: '' }, sort: { key: 'updatedAt', dir: 'desc' },
   boardMode: localStorage.getItem(LS.boardMode) || 'board',
   drawer: null, modal: null, gateError: '', gatePending: null, bootstrap: false, dbError: null,
+  authMode: 'roster', clerk: null, identity: null, backend: 'local', clerkState: 'loading',
 };
 const roles = () => (S.settings.roles && S.settings.roles.length ? S.settings.roles : DEFAULT_ROLES);
 const roleById = (id) => roles().find((r) => r.id === id);
@@ -491,7 +534,7 @@ const getReq = (id) => S.requests.find((r) => r.id === id);
 async function saveMember(m, isNew) {
   const id = lower(m.email);
   const doc = { email: lower(m.email), name: m.name.trim(), roles: m.roles, active: m.active !== false, addedAt: m.addedAt || now(), addedBy: m.addedBy || (S.me && S.me.email) || null };
-  if (m.selfRegistered) doc.selfRegistered = true;
+  if (m.selfRegistered) doc.selfRegistered = true; if (m.authId) doc.authId = m.authId; if (m.emailUnconfirmed) doc.emailUnconfirmed = true;
   const i = S.members.findIndex((x) => x.id === id);
   if (i >= 0) S.members[i] = { ...doc, id }; else S.members.push({ ...doc, id });
   renderAll(false);
@@ -944,6 +987,18 @@ function modalHtml(m) {
 
 /* ---------------- gate (sign in) ---------------- */
 function gateHtml() {
+  if (S.authMode === 'clerk') {
+    const pill = S.backend === 'supabase' ? '<span class="mode-pill live"><span class="dot"></span>Live workspace</span>' : '<span class="mode-pill"><span class="dot"></span>Shared database not connected yet</span>';
+    const domains = (S.settings.allowedDomains || []).map((d) => '@' + d).join(' or ');
+    const body = S.clerkState === 'failed' ? `<div class="callout warn">The sign-in service could not be loaded. Check your connection and reload.</div>`
+      : S.gateError ? `<div class="callout warn">${esc(S.gateError)}</div><div class="row" style="justify-content:center;margin-top:12px"><button class="btn" data-action="signout">Sign in with a different account</button></div>`
+      : S.identity ? `<div class="row" style="justify-content:center;gap:10px"><span class="skeleton" style="width:22px;height:22px;border-radius:50%"></span><span class="small muted">Signed in as ${esc(S.identity.email)} — loading your workspace…</span></div>`
+      : `<div class="clerk-mount" id="clerk-signin"></div>`;
+    return `<div class="gate"><div class="gate-card auth" data-anim><div class="row"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Relay</div><div class="brand-sub">Creative ops · Brick&amp;Bolt</div></div></div>
+      <p class="lede">Requests, briefs, QC and approvals for the branding team. Sign in with your ${esc(domains || 'company')} Google account.</p>
+      ${body}
+      <div class="gate-foot">${pill}</div></div></div>`;
+  }
   const admins = S.members.filter((m) => hasRole(m, 'admin') && m.active !== false).map((m) => m.name);
   const loading = S.mode === 'loading' || !S.loaded.members;
   const domains = (S.settings.allowedDomains || []).map((d) => '@' + d).join(' or ');
@@ -989,8 +1044,8 @@ function shellHtml() {
   return `<div class="app" id="app">
     <nav class="nav" aria-label="Main"><div class="brand"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Relay</div><div class="brand-sub">Creative ops</div></div></div>
       <div class="nav-section">Work</div>${navItems()}<div class="nav-spacer"></div>
-      <div class="nav-foot"><button class="nav-item" data-action="signout" title="Switch user"><span class="avatar sm" style="background:${avatarColor(S.me.email)}">${esc(initials(S.me.name))}</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(S.me.name)}</span>${ic('logout', 'sm')}</button></div></nav>
-    <div class="main"><header class="topbar"><span class="title">${esc(title)}</span><div class="search">${ic('search')}<input type="search" id="q" placeholder="Search tasks, IDs, people…" value="${attr(S.q)}" aria-label="Search"></div><span class="grow"></span>${pill}<button class="btn primary sm" data-action="new">${ic('plus', 'sm')}<span class="nowrap">New request</span></button></header>
+      <div class="nav-foot">${S.authMode === 'clerk' ? `<div class="clerk-user"><span id="clerk-user"></span><span class="name">${esc(S.me.name)}</span></div>` : `<button class="nav-item" data-action="signout" title="Switch user"><span class="avatar sm" style="background:${avatarColor(S.me.email)}">${esc(initials(S.me.name))}</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(S.me.name)}</span>${ic('logout', 'sm')}</button>`}</div></nav>
+    <div class="main">${S.authMode === 'clerk' && S.backend !== 'supabase' && isAdmin() ? `<div class="setup-banner">${ic('alert', 'sm')}<span><b>Shared database not connected.</b> Sign-in works, but tasks are only saved in this browser until the Supabase URL is added to config.js.</span></div>` : ''}<header class="topbar"><span class="title">${esc(title)}</span><div class="search">${ic('search')}<input type="search" id="q" placeholder="Search tasks, IDs, people…" value="${attr(S.q)}" aria-label="Search"></div><span class="grow"></span>${pill}<button class="btn primary sm" data-action="new">${ic('plus', 'sm')}<span class="nowrap">New request</span></button></header>
       <div class="content"><div class="page" id="page"></div></div></div>
     <nav class="bottom-nav" aria-label="Main">${navItems()}</nav></div>`;
 }
@@ -1000,8 +1055,8 @@ const VIEWS = { dashboard: viewDashboard, board: viewBoard, queue: viewQueue, te
 let shellMounted = false;
 function renderAll(animate) {
   const root = $('#root');
-  if (!S.me) { shellMounted = false; root.innerHTML = gateHtml(); if (animate !== false) animateIn(root); syncLayer(); return; }
-  if (!shellMounted) { root.innerHTML = shellHtml(); shellMounted = true; animate = true; }
+  if (!S.me) { shellMounted = false; unmountClerk(); root.innerHTML = gateHtml(); mountClerkSignIn(); if (animate !== false) animateIn(root); syncLayer(); return; }
+  if (!shellMounted) { unmountClerk(); root.innerHTML = shellHtml(); shellMounted = true; animate = true; mountClerkUserButton(); }
   else { const items = navItems(); const side = $('.nav', root); if (side) { $$('.nav-item[data-nav]', side).forEach((x) => x.remove()); side.querySelector('.nav-spacer').insertAdjacentHTML('beforebegin', items); } const bottom = $('.bottom-nav', root); if (bottom) bottom.innerHTML = items; $('.topbar .title').textContent = (NAV.find((n) => n.v === S.route.view) || {}).label || ''; }
   renderPage(animate);
   syncLayer();
@@ -1121,7 +1176,7 @@ document.addEventListener('click', async (e) => {
     case 'confirm-ok': { const m = S.modal; closeModal(); if (m && m._res) m._res(true); break; }
     case 'close-drawer': closeDrawer(); break;
     case 'gate-back': S.gatePending = null; renderAll(false); break;
-    case 'signout': localStorage.removeItem(LS.me); S.me = null; S.drawer = null; S.modal = null; S.flowDraft = null; S.settingsDraft = null; S.gatePending = null; renderAll(true); break;
+    case 'signout': if (S.authMode === 'clerk' && S.clerk) { try { await S.clerk.signOut(); } catch (e) { /* ignore */ } location.assign(pageUrl()); return; } localStorage.removeItem(LS.me); S.me = null; S.drawer = null; S.modal = null; S.flowDraft = null; S.settingsDraft = null; S.gatePending = null; renderAll(true); break;
     case 'edit': openModal({ type: 'edit', id }); break;
     case 'save-brief': { const form = act.closest('form'); const f = formData(form); await actSaveBrief(id, { brief: (f.brief || '').trim(), team: f.team, tatHours: daysToHours(f.tatDays) }); break; }
     case 'set-tat': { const form = act.closest('form'); const f = formData(form); await actSetTat(id, daysToHours(f.tatDays)); break; }
@@ -1220,19 +1275,69 @@ function normalizeSettings(settings) {
 }
 function subscribeAll() {
   const onErr = (e) => { if (e && (e.code === 'revoked' || e.code === 'not_granted')) { S.dbError = e.code; toast('Your access to this workspace changed — reload to continue.', 'crit'); } };
-  S.store.subscribe('members', (rows) => { S.members = rows; S.loaded.members = true; if (S.me) { const fresh = rows.find((m) => sameEmail(m.email, S.me.email)); if (!fresh || fresh.active === false) { if (!sameEmail(S.me.email, APP.ownerEmail)) { S.me = null; localStorage.removeItem(LS.me); toast('Your access was changed by an admin.', 'info'); } } else S.me = fresh; } else if (S.loaded.members) { const saved = localStorage.getItem(LS.me); if (saved) { const m = rows.find((x) => sameEmail(x.email, saved) && x.active !== false); if (m) S.me = m; } } S.bootstrap = S.loaded.members && rows.length === 0; renderAll(false); }, onErr);
+  S.store.subscribe('members', (rows) => { S.members = rows; S.loaded.members = true; if (S.authMode === 'clerk') { resolveIdentity().then(() => renderAll(false)); return; } if (S.me) { const fresh = rows.find((m) => sameEmail(m.email, S.me.email)); if (!fresh || fresh.active === false) { if (!sameEmail(S.me.email, APP.ownerEmail)) { S.me = null; localStorage.removeItem(LS.me); toast('Your access was changed by an admin.', 'info'); } } else S.me = fresh; } else if (S.loaded.members) { const saved = localStorage.getItem(LS.me); if (saved) { const m = rows.find((x) => sameEmail(x.email, saved) && x.active !== false); if (m) S.me = m; } } S.bootstrap = S.loaded.members && rows.length === 0; renderAll(false); }, onErr);
   S.store.subscribe('requests', (rows) => { S.requests = rows.map((r) => ({ visits: [], thread: [], deliverables: [], assignees: {}, refs: [], ...r })).sort((a, b) => (a.num || 0) - (b.num || 0)); S.loaded.requests = true; renderAll(false); }, onErr);
   S.store.subscribe('config', (rows) => { const flow = rows.find((r) => r.id === 'flow'); const settings = rows.find((r) => r.id === 'settings'); if (flow && Array.isArray(flow.stages) && flow.stages.length && flow.stages.some((s) => s.kind === 'triage')) S.flow = flow; S.settings = normalizeSettings(settings); S.loaded.config = true; renderAll(false); }, onErr);
 }
+/* ---------------- Clerk (real identity on the website) ---------------- */
+const pageUrl = () => location.href.split('#')[0];
+const cssVar = (n, fb) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || fb;
+const clerkAppearance = () => ({ variables: { colorPrimary: cssVar('--accent', '#1F4FD1'), colorText: cssVar('--ink', '#0F172A'), colorTextSecondary: cssVar('--ink-2', '#46546B'), colorNeutral: cssVar('--ink', '#0F172A'), colorBackground: cssVar('--surface', '#ffffff'), colorInputBackground: cssVar('--surface-2', '#EAEEF5'), colorInputText: cssVar('--ink', '#0F172A'), colorDanger: cssVar('--crit-mark', '#E5484D'), borderRadius: '10px', fontFamily: '"Instrument Sans", system-ui, sans-serif', fontSize: '15px' }, elements: { cardBox: { boxShadow: 'none', border: '1px solid ' + cssVar('--border', '#D9E0EA') }, footer: { background: 'transparent' } } });
+function waitForClerk(ms = 12000) { return new Promise((res) => { const t0 = Date.now(); (function tick() { if (window.Clerk) return res(window.Clerk); if (window.__clerkLoadFailed || Date.now() - t0 > ms) return res(null); setTimeout(tick, 100); })(); }); }
+function clerkIdentity() { const u = S.clerk && S.clerk.user; if (!u) return null; const email = lower(u.primaryEmailAddress && u.primaryEmailAddress.emailAddress); const name = u.fullName || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || (email ? email.split('@')[0] : 'Someone'); return { authId: u.id, email, name, image: u.imageUrl || null }; }
+let clerkSignInEl = null, clerkUserEl = null;
+function mountClerkSignIn() { if (S.authMode !== 'clerk' || !S.clerk) return; const el = $('#clerk-signin'); if (!el || el === clerkSignInEl) return; clerkSignInEl = el; try { S.clerk.mountSignIn(el, { forceRedirectUrl: pageUrl(), signUpForceRedirectUrl: pageUrl(), appearance: clerkAppearance() }); } catch (e) { console.warn('mountSignIn', e); } }
+function mountClerkUserButton() { if (S.authMode !== 'clerk' || !S.clerk) return; const el = $('#clerk-user'); if (!el || el === clerkUserEl) return; clerkUserEl = el; try { S.clerk.mountUserButton(el, { afterSignOutUrl: pageUrl(), appearance: clerkAppearance() }); } catch (e) { console.warn('mountUserButton', e); } }
+function unmountClerk() { if (!S.clerk) return; try { if (clerkSignInEl && clerkSignInEl.isConnected) S.clerk.unmountSignIn(clerkSignInEl); } catch (e) { /* ignore */ } try { if (clerkUserEl && clerkUserEl.isConnected) S.clerk.unmountUserButton(clerkUserEl); } catch (e) { /* ignore */ } clerkSignInEl = null; clerkUserEl = null; }
+/* Match the signed-in Clerk account to the roster; first-timers on an allowed domain become Requesters. */
+let registering = false;
+async function resolveIdentity() {
+  if (S.authMode !== 'clerk') return;
+  const id = S.identity; if (!id || !id.email) { S.me = null; return; }
+  const m = S.members.find((x) => sameEmail(x.email, id.email));
+  if (m) {
+    if (m.active === false) { S.me = null; S.gateError = 'Your account is inactive — ask an admin to reactivate it.'; return; }
+    S.gateError = '';
+    S.me = { ...m, authId: id.authId, image: id.image };
+    if (!registering && (m.authId !== id.authId || (m.emailUnconfirmed))) { registering = true; try { await saveMember({ ...m, authId: id.authId, emailUnconfirmed: undefined }, 'quiet'); } finally { registering = false; } }
+    return;
+  }
+  if (!S.loaded.members || registering) return;
+  const domains = (S.settings.allowedDomains || []).map(lower);
+  const owner = sameEmail(id.email, APP.ownerEmail);
+  if (!owner && domains.length && !domains.includes(emailDomain(id.email))) { S.me = null; S.gateError = `${id.email} is not on an allowed domain (${domains.map((d) => '@' + d).join(', ')}). Ask an admin to add you.`; return; }
+  registering = true;
+  try { await saveMember({ email: id.email, name: id.name, roles: owner ? ['admin', 'requester'] : ['requester'], active: true, selfRegistered: !owner, authId: id.authId }, 'quiet'); }
+  finally { registering = false; }
+  S.me = { ...S.members.find((x) => sameEmail(x.email, id.email)), authId: id.authId, image: id.image };
+  toast(`Welcome, ${firstName(id)} — you can raise requests right away`);
+}
 async function boot() {
-  readRoute(); renderAll(false);
+  readRoute();
+  const cfg = CFG;
+  if (!inArtifact() && cfg.clerkPublishableKey) S.authMode = 'clerk';
+  renderAll(false);
   let db = null, downloads = null;
-  if (window.claude && typeof window.claude.use === 'function') {
+  if (inArtifact()) {
     try { [db, downloads] = await Promise.all([window.claude.use('db'), window.claude.use('downloads')]); } catch (e) { db = null; }
   }
   S.downloads = downloads;
-  if (db) { S.store = new DbStore(db); S.mode = 'live'; }
-  else { S.store = new LocalStore(); S.mode = 'demo'; }
+  if (S.authMode === 'clerk') {
+    const clerk = await waitForClerk();
+    if (!clerk) { S.clerkState = 'failed'; S.authMode = 'roster'; toast('Sign-in service did not load — using roster sign-in for now.', 'crit'); }
+    else {
+      S.clerk = clerk;
+      try { await clerk.load({ appearance: clerkAppearance() }); S.clerkState = 'ready'; } catch (e) { console.error(e); S.clerkState = 'failed'; }
+      S.identity = clerkIdentity();
+      clerk.addListener(({ user }) => { const next = user ? clerkIdentity() : null; const changed = (next && next.email) !== (S.identity && S.identity.email); S.identity = next; if (changed) { if (!next) { S.me = null; S.drawer = null; S.modal = null; } resolveIdentity().then(() => renderAll(true)); } });
+    }
+  }
+  if (S.authMode === 'clerk' && cfg.supabaseUrl && cfg.supabaseKey && window.supabase && S.clerk) {
+    const client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { accessToken: async () => { try { return S.clerk.session ? await S.clerk.session.getToken() : null; } catch (e) { return null; } } });
+    S.store = new SupabaseStore(client); S.mode = 'live'; S.backend = 'supabase';
+  } else if (db) { S.store = new DbStore(db); S.mode = 'live'; S.backend = 'artifact'; }
+  else { S.store = new LocalStore(); S.mode = 'demo'; S.backend = 'local'; }
+  renderAll(false);
   subscribeAll();
   setInterval(() => { if (document.hidden) return; const ae = document.activeElement; const typing = ae && (ae.tagName === 'TEXTAREA' || (ae.tagName === 'INPUT' && ae.type !== 'search')); if (!typing && S.me) { renderPage(false); if (S.drawer && !S.modal) syncLayer(); } }, 60000);
 }

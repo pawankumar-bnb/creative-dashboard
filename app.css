@@ -650,3 +650,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* ---------- Clerk sign-in ---------- */
+.gate-card.auth { width: min(520px, 100%); }
+.clerk-mount { display: flex; justify-content: center; min-height: 120px; }
+.clerk-mount .cl-rootBox { width: 100%; }
+.clerk-mount .cl-cardBox { width: 100%; box-shadow: none; border: 1px solid var(--border); }
+.nav-foot .clerk-user { display: flex; align-items: center; gap: 10px; padding: 8px 10px; min-height: 44px; }
+.nav-foot .clerk-user .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--ink-2); }
+.rail .nav-foot .clerk-user .name, .rail .nav-foot .clerk-user .role { display: none; }
+@media (max-width: 1023px) { .nav .clerk-user .name, .nav .clerk-user .role { display: none; } }
+.setup-banner { background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid color-mix(in srgb, var(--warn-mark) 40%, transparent); padding: 8px 24px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.setup-banner b { color: var(--ink); }
