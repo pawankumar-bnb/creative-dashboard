@@ -309,7 +309,7 @@ const S = {
   loaded: { members: false, requests: false, config: false },
   route: { view: 'dashboard', id: null },
   q: '', filters: { type: '', prio: '', team: '', mine: false, breached: false, stage: '' }, sort: { key: 'updatedAt', dir: 'desc' },
-  boardMode: localStorage.getItem(LS.boardMode) || 'board',
+  boardMode: localStorage.getItem(LS.boardMode) || 'board', throughputRange: localStorage.getItem('relay.throughput') || '7d',
   drawer: null, modal: null, gateError: '', gatePending: null, bootstrap: false, dbError: null,
   authMode: 'roster', clerk: null, identity: null, backend: 'local', clerkState: 'loading',
 };
@@ -577,9 +577,7 @@ function metrics() {
     const limit = s.slaFrom === 'task' ? (lims.length ? lims.reduce((a, b) => a + b, 0) / lims.length : 0) : stageLimitMs(s, null);
     return { stage: s, avg, n: vs.length, limit, limitLabel: s.slaFrom === 'task' ? 'avg TAT' : 'SLA' };
   });
-  const weeks = []; const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - start.getDay() + 1 - 7 * 7);
-  for (let i = 0; i < 8; i++) { const a = new Date(start); a.setDate(a.getDate() + i * 7); const b = new Date(a); b.setDate(b.getDate() + 7); weeks.push({ label: `${a.getDate()} ${MONTHS[a.getMonth()]}`, from: a.getTime(), to: b.getTime(), raised: 0, approved: 0 }); }
-  S.requests.forEach((r) => { weeks.forEach((w) => { if (r.createdAt >= w.from && r.createdAt < w.to) w.raised++; if (r.completedAt && r.completedAt >= w.from && r.completedAt < w.to) w.approved++; }); });
+  const weeks = throughputSeries(S.throughputRange);
   const weekAgo = now() - 7 * D;
   // Step 11 — per-person performance from stored results
   const people = {};
@@ -593,6 +591,19 @@ function metrics() {
     mine: S.requests.filter((r) => needsMe(r)).length, breached: open.filter(isBreachedNow).length, overdue: open.filter(isOverdue).length,
     avgE2E, recentDoneN: recentDone.length, tatMet, tatMetN: withResult.length, wip, tat, weeks, performance,
   };
+}
+/* Throughput buckets: daily for 7d / 30d, weekly for 12w. Each bucket counts requests raised and approved. */
+function throughputSeries(range) {
+  const buckets = []; const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (range === '12w') {
+    const start = new Date(today); start.setDate(start.getDate() - start.getDay() + 1 - 11 * 7);
+    for (let i = 0; i < 12; i++) { const a = new Date(start); a.setDate(a.getDate() + i * 7); const b = new Date(a); b.setDate(b.getDate() + 7); buckets.push({ label: `${a.getDate()} ${MONTHS[a.getMonth()]}`, tip: `Week of ${a.getDate()} ${MONTHS[a.getMonth()]}`, from: a.getTime(), to: b.getTime(), raised: 0, approved: 0, isNow: today >= a && today < b }); }
+  } else {
+    const n = range === '30d' ? 30 : 7;
+    for (let i = n - 1; i >= 0; i--) { const a = new Date(today); a.setDate(a.getDate() - i); const b = new Date(a); b.setDate(b.getDate() + 1); buckets.push({ label: n === 7 ? DAYS[a.getDay()] : String(a.getDate()), sub: n === 7 ? `${a.getDate()} ${MONTHS[a.getMonth()]}` : (a.getDate() === 1 || i === n - 1 ? MONTHS[a.getMonth()] : ''), tip: `${DAYS[a.getDay()]} ${a.getDate()} ${MONTHS[a.getMonth()]}`, from: a.getTime(), to: b.getTime(), raised: 0, approved: 0, isNow: i === 0, weekend: a.getDay() === 0 }); }
+  }
+  S.requests.forEach((r) => { buckets.forEach((w) => { if (r.createdAt >= w.from && r.createdAt < w.to) w.raised++; if (r.completedAt && r.completedAt >= w.from && r.completedAt < w.to) w.approved++; }); });
+  return buckets;
 }
 function activityFeed(limit = 12) {
   const ev = [];
@@ -665,30 +676,34 @@ function chartBullet(rows) {
     return `<div class="bullet-row" data-tip="${attr(tip)}" tabindex="0"><div class="b-label" style="--c:${attr(themed(r.stage.color))}"><i></i>${esc(r.stage.name)}</div><div class="bullet-track"><div class="fill ${over ? 'over' : ''}" data-w="${fill.toFixed(1)}"></div>${tgt != null ? `<div class="tgt" style="left:${tgt.toFixed(1)}%" title="${attr(r.limitLabel + ' ' + fmtDur(r.limit))}"></div>` : ''}</div><div class="b-val ${over ? 'over' : ''}"><b>${r.avg == null ? '—' : fmtDur(r.avg)}</b>${r.limit ? ` <span class="muted">/ ${fmtDur(r.limit)}</span>` : ''}</div></div>`;
   }).join('')}</div>`;
 }
-function chartLines(weeks) {
-  const w = 460, h = 170, left = 30, right = 50, top = 12, bottom = 26; const plotW = w - left - right, plotH = h - top - bottom;
+function chartColumns(buckets, range) {
+  const n = buckets.length; const w = 640, h = 230, left = 34, right = 16, top = 14, bottom = 34; const plotW = w - left - right, plotH = h - top - bottom;
   const series = [{ key: 'raised', name: 'Raised', color: 'var(--series-1)' }, { key: 'approved', name: 'Approved', color: 'var(--series-2)' }];
-  const max = Math.max(1, ...weeks.flatMap((wk) => [wk.raised, wk.approved])); const ticks = niceTicks(max, 3); const top_ = ticks[ticks.length - 1];
-  const x = (i) => left + (i / (weeks.length - 1)) * plotW; const y = (v) => top + plotH - (v / top_) * plotH;
-  let out = `<div class="chart chart-lines"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Requests raised and approved per week">`;
+  const max = Math.max(...buckets.flatMap((b) => [b.raised, b.approved]), 0); const ticks = niceTicks(Math.max(max, 3), 3); const topV = ticks[ticks.length - 1];
+  const band = plotW / n; const gap = 2; const colW = Math.min(24, Math.max(4, (band * 0.62 - gap) / 2)); const groupW = colW * 2 + gap;
+  const x0 = (i) => left + i * band + (band - groupW) / 2; const y = (v) => top + plotH - (v / topV) * plotH;
+  const empty = max === 0;
+  let out = `<div class="chart chart-cols"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Requests raised and approved per ${range === '12w' ? 'week' : 'day'}">`;
+  buckets.forEach((b, i) => { if (b.weekend && range !== '12w') out += `<rect x="${left + i * band}" y="${top}" width="${band}" height="${plotH}" fill="var(--surface-2)" opacity="0.45"/>`; });
   ticks.forEach((t) => { out += `<line class="grid-line" x1="${left}" y1="${y(t)}" x2="${w - right}" y2="${y(t)}"/><text x="${left - 8}" y="${y(t) + 4}" text-anchor="end">${t}</text>`; });
-  weeks.forEach((wk, i) => { if (i % 2 === 0 || i === weeks.length - 1) out += `<text x="${x(i)}" y="${h - 6}" text-anchor="middle">${esc(wk.label)}</text>`; });
-  const lastVals = series.map((s) => weeks[weeks.length - 1][s.key]);
-  const collide = Math.abs(y(lastVals[0]) - y(lastVals[1])) < 12;
-  series.forEach((s, si) => {
-    const pts = weeks.map((wk, i) => `${x(i)},${y(wk[s.key])}`);
-    out += `<path class="area" d="M${x(0)},${y(0)} L${pts.join(' L')} L${x(weeks.length - 1)},${y(0)} Z" fill="${s.color}"/>`;
-    out += `<polyline class="line" points="${pts.join(' ')}" stroke="${s.color}"/>`;
-    const last = lastVals[si];
-    out += `<circle class="dot" cx="${x(weeks.length - 1)}" cy="${y(last)}" r="4" fill="${s.color}"/>`;
-    if (!collide) out += `<text class="val" x="${x(weeks.length - 1) + 8}" y="${y(last) + 4}">${last} ${esc(s.name.toLowerCase())}</text>`;
+  out += `<line class="axis" x1="${left}" y1="${y(0)}" x2="${w - right}" y2="${y(0)}"/>`;
+  const labelEvery = range === '30d' ? 5 : range === '12w' ? 2 : 1;
+  buckets.forEach((b, i) => {
+    const cx = left + i * band + band / 2; const isNow = b.isNow;
+    if (i % labelEvery === 0 || isNow || i === n - 1) out += `<text x="${cx}" y="${h - 20}" text-anchor="middle" class="${isNow ? 'lbl' : ''}" style="${isNow ? 'font-weight:600' : ''}">${esc(isNow && range !== '12w' ? 'Today' : b.label)}</text>`;
+    if (b.sub && range === '7d') out += `<text x="${cx}" y="${h - 6}" text-anchor="middle" style="font-size:10.5px;fill:var(--ink-4)">${esc(b.sub)}</text>`;
+    if (b.sub && range === '30d' && (i % labelEvery === 0 || i === n - 1)) out += `<text x="${cx}" y="${h - 6}" text-anchor="middle" style="font-size:10.5px;fill:var(--ink-4)">${esc(b.sub)}</text>`;
+    out += `<rect class="hit" x="${left + i * band}" y="${top}" width="${band}" height="${plotH}" tabindex="0" data-tip="${attr(b.tip)}" data-tip-rows="${attr(JSON.stringify([{ c: 'var(--series-1)', l: 'raised', v: b.raised }, { c: 'var(--series-2)', l: 'approved', v: b.approved }]))}"></rect>`;
+    out += '<g class="cols">';
+    series.forEach((s, si) => { const v = b[s.key]; const bx = x0(i) + si * (colW + gap); const bh = Math.max(0, y(0) - y(v)); if (v > 0) out += `<path class="bar" d="${colPath(bx, y(v), colW, bh, 4)}" fill="${s.color}"/>`; else out += `<rect x="${bx}" y="${y(0) - 2}" width="${colW}" height="2" fill="${s.color}" opacity="0.35"/>`; });
+    out += '</g>';
   });
-  if (collide) out += `<text class="val" x="${x(weeks.length - 1) + 8}" y="${y(lastVals[0]) + 4}">${lastVals[0]} raised · ${lastVals[1]} approved</text>`;
-  out += `<line class="crosshair" data-cross x1="0" y1="${top}" x2="0" y2="${top + plotH}"/>`;
-  weeks.forEach((wk, i) => { const cw = plotW / (weeks.length - 1); out += `<rect class="hit" x="${x(i) - cw / 2}" y="${top}" width="${cw}" height="${plotH}" data-cross-x="${x(i)}" data-tip-rows="${attr(JSON.stringify([{ c: 'var(--series-1)', l: 'Raised', v: wk.raised }, { c: 'var(--series-2)', l: 'Approved', v: wk.approved }]))}" data-tip="Week of ${attr(wk.label)}" tabindex="0"></rect>`; });
-  out += `</svg><div class="legend">${series.map((s) => `<span class="key" style="--c:${s.color}"><i></i>${esc(s.name)}</span>`).join('')}</div></div>`;
+  if (empty) out += `<text x="${left + plotW / 2}" y="${top + plotH / 2}" text-anchor="middle" style="fill:var(--ink-3);font-size:13px">Nothing raised or approved in this period yet</text>`;
+  out += `</svg><div class="legend">${series.map((s) => `<span class="key" style="--c:${s.color}"><i class="rect"></i>${esc(s.name)}</span>`).join('')}</div></div>`;
   return out;
 }
+/* Column with a 4px rounded cap and a square base on the baseline. */
+function colPath(x, y, w, h, r) { r = Math.min(r, w / 2, h); if (h <= 0) return ''; return `M${x},${y + h} v-${h - r} a${r},${r} 0 0 1 ${r},-${r} h${w - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${h - r} z`; }
 
 /* ---------------- views ---------------- */
 function viewDashboard() {
@@ -710,7 +725,7 @@ function viewDashboard() {
     <div class="grid charts">
       <div class="panel" data-anim><div class="panel-head"><div><h2>Where work is sitting</h2><div class="sub">Open requests by stage · red count is over its limit</div></div></div><div class="panel-body">${m.wip.some((x) => x.count) ? chartBarsH(m.wip.map((x) => ({ label: x.stage.name, value: x.count, color: themed(x.stage.color), extra: x.breached ? `· ${x.breached} over` : '', tip: `${x.stage.name}: ${plural(x.count, 'open request')}${x.breached ? `, ${x.breached} over limit` : ''}` })), { aria: 'Open requests by stage' }) : emptyHtml('board', 'No open requests right now')}</div></div>
       <div class="panel" data-anim><div class="panel-head"><div><h2>Turnaround vs limit</h2><div class="sub">Average time per stage · marker is the SLA, or the average TAT set for production</div></div></div><div class="panel-body">${chartBullet(m.tat)}</div></div>
-      <div class="panel" data-anim><div class="panel-head"><div><h2>Throughput</h2><div class="sub">Requests raised and approved per week, last 8 weeks</div></div></div><div class="panel-body">${chartLines(m.weeks)}</div></div>
+      <div class="panel span-2" data-anim><div class="panel-head"><div><h2>Throughput</h2><div class="sub">${(() => { const tr = m.weeks.reduce((a, b) => a + b.raised, 0), ta = m.weeks.reduce((a, b) => a + b.approved, 0); return `<b style="color:var(--ink)">${tr}</b> raised · <b style="color:var(--ink)">${ta}</b> approved in the last ${S.throughputRange === '7d' ? '7 days' : S.throughputRange === '30d' ? '30 days' : '12 weeks'}`; })()}</div></div><div class="seg" role="tablist" aria-label="Throughput period">${[['7d', '7 days'], ['30d', '30 days'], ['12w', '12 weeks']].map(([k, l]) => `<button role="tab" class="${S.throughputRange === k ? 'active' : ''}" data-range="${k}">${l}</button>`).join('')}</div></div><div class="panel-body">${chartColumns(m.weeks, S.throughputRange)}</div></div>
     </div>
     <div class="panel" data-anim><div class="panel-head"><div><h2>Team turnaround</h2><div class="sub">Per person — stored on every task at final approval · last 30 days</div></div></div><div class="table-wrap" style="padding:6px 6px 8px"><table class="tbl"><thead><tr><th>Person</th><th>Team</th><th>In hand</th><th>Approved (30d)</th><th>Avg TAT</th><th>Avg target</th><th>On time</th><th>Avg rounds</th><th>All time</th></tr></thead><tbody>
       ${perf.length ? perf.map((p) => `<tr><td>${whoHtml(p.person)}</td><td>${teamChip(p.team)}</td><td class="num">${p.open || '—'}</td><td class="num">${p.recent || '—'}</td><td class="num">${p.avgActual == null ? '—' : fmtDur(p.avgActual * H)}</td><td class="num muted">${p.avgTarget == null ? '—' : fmtDur(p.avgTarget * H)}</td><td>${p.onTime == null ? '<span class="muted">—</span>' : `<span class="chip ${p.onTime >= 0.8 ? 'good' : p.onTime >= 0.5 ? 'warn' : 'crit'}">${Math.round(p.onTime * 100)}%</span>`}</td><td class="num">${p.avgRounds == null ? '—' : p.avgRounds.toFixed(1)}</td><td class="num muted">${p.done || '—'}</td></tr>`).join('') : `<tr><td colspan="9">${emptyHtml('award', 'No completed tasks yet')}</td></tr>`}
@@ -1163,6 +1178,7 @@ function noteBox(opts) { return new Promise((res) => { S.modal = { type: 'note',
 
 document.addEventListener('click', async (e) => {
   const openEl = e.target.closest('[data-open]'); if (openEl && !e.target.closest('a')) { openRequest(openEl.dataset.open); return; }
+  const rangeEl = e.target.closest('[data-range]'); if (rangeEl) { S.throughputRange = rangeEl.dataset.range; localStorage.setItem('relay.throughput', S.throughputRange); renderPage(false); return; }
   const modeEl = e.target.closest('[data-mode]'); if (modeEl) { S.boardMode = modeEl.dataset.mode; localStorage.setItem(LS.boardMode, S.boardMode); renderPage(false); return; }
   const tog = e.target.closest('[data-toggle]'); if (tog) { S.filters[tog.dataset.toggle] = !S.filters[tog.dataset.toggle]; renderPage(false); return; }
   const sortEl = e.target.closest('[data-sort]'); if (sortEl) { const k = sortEl.dataset.sort; if (S.sort.key === k) S.sort.dir = S.sort.dir === 'asc' ? 'desc' : 'asc'; else S.sort = { key: k, dir: ['title', 'assignee', 'type'].includes(k) ? 'asc' : 'desc' }; renderPage(false); return; }
