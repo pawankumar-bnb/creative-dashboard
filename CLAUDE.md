@@ -13,6 +13,12 @@
 - Supabase RLS needs the Clerk session token to carry `role: authenticated` (Clerk Supabase integration) and an `email` claim (session token customization). `supabase/schema.sql` is the source of truth for policies; `supabase/seed.sql` is generated from the app defaults + samples (regenerate with the node snippet in git history if defaults change).
 - Clerk can't run inside the artifact (CSP), so `scripts/build-artifact.mjs` strips the `<!-- site:start -->…<!-- site:end -->` block.
 
+## Domains & Clerk instances
+
+- Production site: https://creative.bricknbolt.com (GitHub Pages custom domain, `CNAME` file in repo). Clerk production instance `ins_3JKZ5DCCAuXLjxtWVaEF1RU91hU` is bound to it (Frontend API `clerk.creative.bricknbolt.com`, key `pk_live_…` chosen by hostname in `config.js`); the dev instance (`pk_test_…`) serves github.io/localhost.
+- Supabase third-party auth must list BOTH Clerk domains (dev `famous-weasel-9594.clerk.accounts.dev` and prod `clerk.creative.bricknbolt.com`).
+- Production Google sign-in needs custom OAuth credentials in Clerk (redirect URI `https://clerk.creative.bricknbolt.com/v1/oauth_callback`).
+
 ## Data model reminders
 
 - Artifact viewer → `DbStore` (shared realtime `db`). Static hosting → `LocalStore` (per-browser demo mode) until a real backend adapter exists.
