@@ -95,7 +95,9 @@ create policy "config: admins write" on public.docs
 create or replace function public.docs_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.collection = 'members' and not public.is_admin() then
+  -- Only police real app logins (JWT role = authenticated). Direct database access —
+  -- the SQL editor, migrations, the service role — is trusted and skips the guard.
+  if new.collection = 'members' and coalesce(auth.jwt() ->> 'role', '') = 'authenticated' and not public.is_admin() then
     if new.id <> public.jwt_email() then
       raise exception 'You can only edit your own team entry';
     end if;
