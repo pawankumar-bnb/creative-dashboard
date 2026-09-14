@@ -1,5 +1,5 @@
 /* ============================================================
-   Relay — Creative Ops for Brick&Bolt's branding team
+   Creative Request Ops — Brick&Bolt's branding team
    Requested → Brief & assign (coordinator) → In production (design /
    video team, per-task TAT) → QC (coordinator) → Final approval
    (requester or admin) → Approved. Every stage is timed; SLA and TAT
@@ -9,7 +9,7 @@
 'use strict';
 
 /* ---------------- constants ---------------- */
-const APP = { name: 'Relay', ownerEmail: 'pawankumar@bricknbolt.com', ownerName: 'Pawan Kumar' };
+const APP = { name: 'Creative Request Ops', ownerEmail: 'pawankumar@bricknbolt.com', ownerName: 'Pawan Kumar' };
 const CFG = window.RELAY_CONFIG || {};
 const inArtifact = () => !!(window.claude && typeof window.claude.use === 'function');
 const LS = { me: 'relay.me', boardMode: 'relay.boardMode', local: 'relay.local.v2' };
@@ -697,7 +697,7 @@ function viewDashboard() {
   const attention = S.requests.filter((r) => r.status === 'open' && (isBreachedNow(r) || isOverdue(r))).sort((a, b) => (slaState(b).ratio || 0) - (slaState(a).ratio || 0)).slice(0, 8);
   const kpi = (label, value, foot, cls = '', count = true) => `<div class="panel kpi ${cls}" data-anim><div class="k-label">${esc(label)}</div><div class="k-value" ${count && typeof value === 'number' ? `data-count="${value}"` : ''}>${typeof value === 'number' ? value : esc(value)}</div><div class="k-foot">${foot}</div></div>`;
   const perf = m.performance;
-  return `<div class="page-head" data-anim><div><h1>${greet}, ${esc(first)}</h1><p class="lede">${m.mine ? `<b>${plural(m.mine, 'task')}</b> waiting on you` : 'Nothing is waiting on you'} · ${plural(m.open, 'open request')} in the relay${m.breached ? ` · <span style="color:var(--crit);font-weight:600">${m.breached} over SLA / TAT</span>` : ''}</p></div>
+  return `<div class="page-head" data-anim><div><h1>${greet}, ${esc(first)}</h1><p class="lede">${m.mine ? `<b>${plural(m.mine, 'task')}</b> waiting on you` : 'Nothing is waiting on you'} · ${plural(m.open, 'open request')} in progress${m.breached ? ` · <span style="color:var(--crit);font-weight:600">${m.breached} over SLA / TAT</span>` : ''}</p></div>
     <div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>
   <div class="stack">
     <div class="grid kpis">
@@ -785,7 +785,7 @@ function viewQueue() {
   sections.push(sec('Assigned to me', 'Tasks in production with you', work, 'inbox'));
   if (isCoordinator() || isAdmin()) sections.push(sec('To QC', 'Submitted work waiting for your check', qc, 'eye'));
   sections.push(sec('Waiting for my approval', isAdmin() ? 'Final approvals — you or the requester can approve' : 'Your requests that passed QC — approve or ask for changes', approvals, 'check'));
-  sections.push(sec('My open requests', 'Requirements you raised, still in the relay', raised, 'file'));
+  sections.push(sec('My open requests', 'Requirements you raised, still in progress', raised, 'file'));
   return `<div class="page-head" data-anim><div><h1>My queue</h1><p class="lede">What is waiting on you, ${esc(firstName(S.me))} — ${roles().filter((r) => hasRole(S.me, r.id)).map((r) => r.name).join(', ') || 'no role yet'}.</p></div><div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>
   <div class="grid two">${sections.join('')}</div>`;
 }
@@ -841,7 +841,7 @@ function viewFlow() {
       <div class="se-ops"><button class="btn ghost sm icon-only" data-action="stage-up" data-i="${i}" ${i <= 1 || i === f.stages.length - 1 ? 'disabled' : ''} aria-label="Move up">${ic('up', 'sm')}</button><button class="btn ghost sm icon-only" data-action="stage-down" data-i="${i}" ${i === 0 || i >= f.stages.length - 2 ? 'disabled' : ''} aria-label="Move down">${ic('down', 'sm')}</button><button class="btn ghost sm icon-only" data-action="stage-del" data-i="${i}" ${s.kind === 'start' || s.kind === 'end' || openCounts[s.id] ? 'disabled' : ''} title="${openCounts[s.id] ? plural(openCounts[s.id], 'open request') + ' in this stage' : 'Remove stage'}" aria-label="Remove stage">${ic('trash', 'sm')}</button></div>
     </div>`).join('')}
     <div class="callout" style="margin-top:14px">A <b>Brief / triage</b> stage is where the coordinator writes the brief, picks the person and sets the TAT. A <b>Work</b> stage is timed against that TAT. An <b>Approval</b> stage can be passed by any of the people ticked; "changes" send the task back to the stage you choose as a new round.</div></div></div>` : '';
-  return `<div class="page-head" data-anim><div><h1>Flow</h1><p class="lede">The relay every request runs through. Version ${S.flow.version || 1}${S.flow.updatedAt ? ` · updated ${fmtRel(S.flow.updatedAt)}` : ''}.</p></div></div>
+  return `<div class="page-head" data-anim><div><h1>Flow</h1><p class="lede">The flow every request runs through. Version ${S.flow.version || 1}${S.flow.updatedAt ? ` · updated ${fmtRel(S.flow.updatedAt)}` : ''}.</p></div></div>
   <div class="stack"><div class="panel" data-anim><div class="panel-head"><div><h2>Current flow</h2><div class="sub">Each stage's owner and time limit</div></div></div><div class="panel-body">${flowDiagram(admin ? f : S.flow)}</div></div>${editor}</div>`;
 }
 function viewSettings() {
@@ -994,8 +994,8 @@ function gateHtml() {
       : S.gateError ? `<div class="callout warn">${esc(S.gateError)}</div><div class="row" style="justify-content:center;margin-top:12px"><button class="btn" data-action="signout">Sign in with a different account</button></div>`
       : S.identity ? `<div class="row" style="justify-content:center;gap:10px"><span class="skeleton" style="width:22px;height:22px;border-radius:50%"></span><span class="small muted">Signed in as ${esc(S.identity.email)} — loading your workspace…</span></div>`
       : `<div class="clerk-mount" id="clerk-signin"></div>`;
-    return `<div class="gate"><div class="gate-card auth" data-anim><div class="row"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Relay</div><div class="brand-sub">Creative ops · Brick&amp;Bolt</div></div></div>
-      <p class="lede">Requests, briefs, QC and approvals for the branding team. Sign in with your ${esc(domains || 'company')} Google account.</p>
+    return `<div class="gate"><div class="gate-card auth" data-anim><div class="row"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Creative Request Ops</div><div class="brand-sub">Brick&amp;Bolt</div></div></div>
+      <p class="lede">Requests, briefs, QC and approvals for Brick&amp;Bolt's branding team. Sign in with your ${esc(domains || 'company')} Google account.</p>
       ${body}
       <div class="gate-foot">${pill}</div></div></div>`;
   }
@@ -1007,7 +1007,7 @@ function gateHtml() {
   if (S.bootstrap) body = `<form data-form="bootstrap" class="stack" style="gap:12px"><div class="field"><label for="g-name">Your name</label><input class="input" id="g-name" name="name" required value="${attr(APP.ownerName)}"></div><div class="field"><label for="g-email">Work email</label><input class="input" id="g-email" name="email" type="email" required value="${attr(APP.ownerEmail)}"></div><button class="btn primary block" type="submit">Set up workspace as admin</button></form>`;
   else if (S.gatePending) body = `<form data-form="register" class="stack" style="gap:12px"><div class="callout">First time here — welcome. You'll be able to raise requests straight away.</div><div class="field"><label>Work email</label><div class="input mono" style="background:var(--surface-2)">${esc(S.gatePending)}</div></div><div class="field"><label for="g-name">Your name</label><input class="input" id="g-name" name="name" required placeholder="As your team knows you" autofocus></div><div class="row"><button class="btn" type="button" data-action="gate-back">Back</button><button class="btn primary" type="submit" style="flex:1">Continue</button></div></form>`;
   else body = `<form data-form="signin" class="stack" style="gap:12px"><div class="field"><label for="g-email">Work email</label><input class="input" id="g-email" name="email" type="email" required placeholder="name@bricknbolt.com" autocomplete="email" ${loading ? 'disabled' : ''}>${S.gateError ? `<span class="error">${esc(S.gateError)}</span>` : `<span class="hint">Anyone with a ${esc(domains || 'company')} email can sign in.</span>`}</div><button class="btn primary block" type="submit" ${loading ? 'disabled' : ''}>${loading ? 'Loading team…' : 'Continue'}</button></form>`;
-  return `<div class="gate"><div class="gate-card" data-anim><div class="row"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Relay</div><div class="brand-sub">Creative ops · Brick&amp;Bolt</div></div></div>
+  return `<div class="gate"><div class="gate-card" data-anim><div class="row"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Creative Request Ops</div><div class="brand-sub">Brick&amp;Bolt</div></div></div>
     <div><h1>${S.bootstrap ? 'Set up your workspace' : S.gatePending ? 'Nearly there' : 'Who\'s working?'}</h1><p class="lede" style="margin-top:6px">${S.bootstrap ? 'No team yet — the first person in becomes the admin.' : S.gatePending ? 'Tell the team who you are.' : 'Requests, briefs, QC and approvals for the branding team.'}</p></div>
     ${body}
     <div class="gate-foot">${pill}<br><span style="display:inline-block;margin-top:8px">${admins.length ? `Questions about access? Ask ${esc(admins.join(' or '))}.` : ''}</span></div></div></div>`;
@@ -1042,7 +1042,7 @@ function shellHtml() {
   const title = (NAV.find((n) => n.v === S.route.view) || {}).label || '';
   const pill = S.mode === 'demo' ? '<span class="mode-pill" title="No shared database in this view — data is saved in this browser only">Demo</span>' : '';
   return `<div class="app" id="app">
-    <nav class="nav" aria-label="Main"><div class="brand"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Relay</div><div class="brand-sub">Creative ops</div></div></div>
+    <nav class="nav" aria-label="Main"><div class="brand"><div class="brand-mark">${ic('relay')}</div><div><div class="brand-name">Creative Request Ops</div><div class="brand-sub">Brick&amp;Bolt</div></div></div>
       <div class="nav-section">Work</div>${navItems()}<div class="nav-spacer"></div>
       <div class="nav-foot">${S.authMode === 'clerk' ? `<div class="clerk-user"><span id="clerk-user"></span><span class="name">${esc(S.me.name)}</span></div>` : `<button class="nav-item" data-action="signout" title="Switch user"><span class="avatar sm" style="background:${avatarColor(S.me.email)}">${esc(initials(S.me.name))}</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(S.me.name)}</span>${ic('logout', 'sm')}</button>`}</div></nav>
     <div class="main">${S.authMode === 'clerk' && S.backend !== 'supabase' && isAdmin() ? `<div class="setup-banner">${ic('alert', 'sm')}<span><b>Shared database not connected.</b> Sign-in works, but tasks are only saved in this browser until the Supabase URL is added to config.js.</span></div>` : ''}<header class="topbar"><span class="title">${esc(title)}</span><div class="search">${ic('search')}<input type="search" id="q" placeholder="Search tasks, IDs, people…" value="${attr(S.q)}" aria-label="Search"></div><span class="grow"></span>${pill}<button class="btn primary sm" data-action="new">${ic('plus', 'sm')}<span class="nowrap">New request</span></button></header>
@@ -1140,7 +1140,7 @@ function csvExport() {
   return [head, ...rows].map((r) => r.map(q).join(',')).join('\n');
 }
 async function doExport() {
-  const data = csvExport(); const filename = `relay-tasks-${isoToday()}.csv`;
+  const data = csvExport(); const filename = `creative-request-ops-tasks-${isoToday()}.csv`;
   if (S.downloads) { try { await S.downloads.save({ filename, data }); toast('CSV saved'); } catch (e) { if (e && e.code !== 'declined') toast('Could not save the file here.', 'crit'); } return; }
   try { const blob = new Blob([data], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); toast('CSV downloaded'); } catch (e) { toast('Downloads are not available in this view.', 'crit'); }
 }

@@ -1,6 +1,6 @@
 # creative-dashboard — working notes for Claude
 
-**What this is:** Relay, Brick&Bolt's creative-ops relay (Requested → Brief & assign by the coordinator → In production by design/video → QC → Final approval by requester-or-admin → Approved) with per-task TAT set by the coordinator, per-stage SLAs, breach flags, and the assignee's TAT stored on approval. Plain HTML/CSS/JS, no build step. See README.md for the full description.
+**What this is:** Creative Request Ops (formerly "Relay"), Brick&Bolt's creative-ops flow (Requested → Brief & assign by the coordinator → In production by design/video → QC → Final approval by requester-or-admin → Approved) with per-task TAT set by the coordinator, per-stage SLAs, breach flags, and the assignee's TAT stored on approval. Plain HTML/CSS/JS, no build step. See README.md for the full description.
 
 ## Deployment rules (set by Pawan)
 

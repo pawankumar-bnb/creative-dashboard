@@ -1,4 +1,4 @@
-/* Relay — sample data (demo mode + first-run seed). Everything here is plainly
+/* Creative Request Ops — sample data (demo mode + first-run seed). Everything here is plainly
    marked `sample` and can be removed from Settings → Housekeeping. Names come
    from the branding team's tracker; sample actors carry no email. */
 (function (root) {

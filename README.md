@@ -1,4 +1,4 @@
-# Relay — Creative Ops for Brick&Bolt
+# Creative Request Ops — Brick&Bolt
 
 A workflow app that moves the branding team's requests through a relay:
 
