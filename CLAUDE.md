@@ -21,7 +21,7 @@
 
 ## Email notifications
 
-- `supabase/notifications.sql` → trigger `docs_notify` on `public.docs` posts events via `pg_net` to the Apps Script mailer (`mailer/Code.gs`) — token in Vault (`mailer_token`), URL + app_url in `public.mailer_config` (RLS, no policies). Master switch = `config/settings.notifications.enabled` (Settings page).
+- `supabase/notifications.sql` → trigger `docs_notify` on `public.docs` queues events in `public.mail_outbox`; the Apps Script mailer (`mailer/Code.gs`, 1-minute time trigger, no web app) claims/acks them via RPCs guarded by the Vault secret `mailer_token`. `public.mailer_config.app_url` builds task links. Master switch = `config/settings.notifications.enabled` (Settings page). Workspace admin blocks 'Anyone' web apps, hence polling.
 - Events: raised, assigned, reassigned, submitted, rework, qc_passed, approved, reopened, cancelled. Actor excluded from recipients.
 
 ## Data model reminders

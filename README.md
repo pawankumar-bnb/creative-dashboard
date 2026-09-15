@@ -53,7 +53,9 @@ Roles still live in the app's roster (Team page): a first-time sign-in on an all
 
 ## Email notifications
 
-`supabase/notifications.sql` installs a trigger that watches every request write and posts one JSON event per stage change to a mailer: **raised** → coordinator, **assigned / reassigned** → assignee (+ requester), **submitted for QC** → coordinator (+ requester), **rework** → assignee (+ requester), **QC passed** → requester + admins, **approved** → everyone on the task. The person who performed the action is never emailed. The mailer is `mailer/Code.gs`, a Google Apps Script web app that sends from the admin's Brick&Bolt account (deploy as *Execute as me / Anyone*; put the same secret in `TOKEN` and in Supabase Vault as `mailer_token`; put the web-app URL in `public.mailer_config`). Master switch: Settings → Email notifications.
+`supabase/notifications.sql` installs a trigger that watches every request write and queues one event per stage change in `public.mail_outbox`: **raised** → coordinator, **assigned / reassigned** → assignee (+ requester), **submitted for QC** → coordinator (+ requester), **rework** → assignee (+ requester), **QC passed** → requester + admins, **approved** → everyone on the task. The person who performed the action is never emailed.
+
+The mailer is `mailer/Code.gs`, a Google Apps Script that runs on a 1-minute timer, claims queued events through two token-guarded RPCs (`mail_outbox_claim` / `mail_outbox_ack`) and sends from the admin's Brick&Bolt account. Setup: paste the script, set `TOKEN` to the same secret stored in Supabase Vault as `mailer_token`, run `setup()` once. No web-app deployment is needed (Workspace admins often block those). Master switch: Settings → Email notifications.
 
 ## Run locally
 

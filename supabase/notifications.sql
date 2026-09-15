@@ -1,34 +1,82 @@
 -- ============================================================
--- Creative Request Ops — email notifications
+-- Creative Request Ops — email notifications (outbox model)
 --
 -- A trigger watches every request write, works out which stage change
--- happened, chooses the recipients by role, and posts one JSON event to
--- the mailer (a Google Apps Script web app that sends from the admin's
--- Brick&Bolt account). Sending is asynchronous (pg_net), so a slow or
--- failing mailer never blocks the app.
+-- happened, chooses the recipients by role, and queues one event in
+-- public.mail_outbox. The mailer (mailer/Code.gs, a Google Apps Script on
+-- a 1-minute timer) claims queued events through two RPCs guarded by a
+-- shared secret, sends the emails from the admin's Google account, and
+-- acknowledges them. Nothing here needs a public web app or outbound
+-- calls from the database.
 --
 -- One-time setup after running this file:
---   1. select vault.create_secret('<the TOKEN from mailer/Code.gs>', 'mailer_token');
---   2. insert into public.mailer_config (id, mailer_url) values (1, '<Apps Script web app URL>')
---      on conflict (id) do update set mailer_url = excluded.mailer_url;
+--   select vault.create_secret('<the TOKEN from mailer/Code.gs>', 'mailer_token');
 -- The master switch lives in the app: Settings → Email notifications.
 -- ============================================================
 
-create extension if not exists pg_net with schema extensions;
-
 create table if not exists public.mailer_config (
   id         integer primary key default 1 check (id = 1),
-  mailer_url text    not null,
   app_url    text    not null default 'https://pawankumar-bnb.github.io/creative-dashboard/',
   updated_at timestamptz not null default now()
 );
 alter table public.mailer_config enable row level security;   -- no policies: never readable from the browser
+insert into public.mailer_config (id) values (1) on conflict (id) do nothing;
+
+create table if not exists public.mail_outbox (
+  id          bigserial primary key,
+  created_at  timestamptz not null default now(),
+  event       text        not null,
+  payload     jsonb       not null,
+  status      text        not null default 'pending',   -- pending | claimed | sent | failed
+  claimed_at  timestamptz,
+  sent_at     timestamptz,
+  error       text
+);
+create index if not exists mail_outbox_status_idx on public.mail_outbox (status, id);
+alter table public.mail_outbox enable row level security;     -- no policies: only the RPCs below touch it
+
+-- The mailer claims a batch (stale claims older than 10 minutes are released first) ...
+create or replace function public.mail_outbox_claim(p_token text, p_limit integer default 25)
+returns setof public.mail_outbox
+language plpgsql security definer set search_path = public as $$
+declare tok text;
+begin
+  select decrypted_secret into tok from vault.decrypted_secrets where name = 'mailer_token' limit 1;
+  if tok is null or p_token is null or p_token <> tok then raise exception 'unauthorized' using errcode = '28000'; end if;
+  update public.mail_outbox set status = 'pending', claimed_at = null where status = 'claimed' and claimed_at < now() - interval '10 minutes';
+  delete from public.mail_outbox where status in ('sent', 'failed') and created_at < now() - interval '30 days';
+  return query
+    update public.mail_outbox o set status = 'claimed', claimed_at = now()
+    where o.id in (select id from public.mail_outbox where status = 'pending' order by id limit greatest(1, least(p_limit, 100)) for update skip locked)
+    returning o.*;
+end $$;
+-- ... and reports what happened.
+create or replace function public.mail_outbox_ack(p_token text, p_results jsonb)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare tok text; n integer := 0; r jsonb;
+begin
+  select decrypted_secret into tok from vault.decrypted_secrets where name = 'mailer_token' limit 1;
+  if tok is null or p_token is null or p_token <> tok then raise exception 'unauthorized' using errcode = '28000'; end if;
+  for r in select * from jsonb_array_elements(coalesce(p_results, '[]'::jsonb)) loop
+    update public.mail_outbox
+       set status = case when coalesce((r ->> 'ok')::boolean, false) then 'sent' else 'failed' end,
+           sent_at = case when coalesce((r ->> 'ok')::boolean, false) then now() else null end,
+           error = r ->> 'error'
+     where id = (r ->> 'id')::bigint and status = 'claimed';
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+revoke all on function public.mail_outbox_claim(text, integer) from public;
+revoke all on function public.mail_outbox_ack(text, jsonb) from public;
+grant execute on function public.mail_outbox_claim(text, integer) to anon, authenticated;
+grant execute on function public.mail_outbox_ack(text, jsonb) to anon, authenticated;
 
 create or replace function public.notify_request_change() returns trigger
-language plpgsql security definer set search_path = public, extensions as $$
+language plpgsql security definer set search_path = public as $$
 declare
   cfg          public.mailer_config%rowtype;
-  token        text;
   settings     jsonb;
   stages       jsonb;
   work_stage   text;
@@ -52,8 +100,6 @@ begin
 
   select * into cfg from public.mailer_config where id = 1;
   if not found then return new; end if;
-  select decrypted_secret into token from vault.decrypted_secrets where name = 'mailer_token' limit 1;
-  if token is null then return new; end if;
 
   -- master switch (Settings → Email notifications); defaults to on
   select data into settings from public.docs where collection = 'config' and id = 'settings';
@@ -131,7 +177,6 @@ begin
   if jsonb_array_length(recips) = 0 then return new; end if;
 
   payload := jsonb_build_object(
-    'token', token,
     'event', ev,
     'actor', jsonb_build_object('email', actor_email, 'name', actor_name),
     'note', note,
@@ -155,12 +200,7 @@ begin
     )
   );
 
-  perform net.http_post(
-    url := cfg.mailer_url,
-    body := payload,
-    headers := '{"Content-Type": "application/json"}'::jsonb,
-    timeout_milliseconds := 8000
-  );
+  insert into public.mail_outbox (event, payload) values (ev, payload);
   return new;
 exception when others then
   raise warning 'notify_request_change failed: %', sqlerrm;

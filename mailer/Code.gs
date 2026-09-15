@@ -1,36 +1,61 @@
 /**
- * Creative Request Ops — email notifier (Google Apps Script)
+ * Creative Request Ops — email notifier (Google Apps Script, polling)
  *
- * Deployed as a Web app ("Execute as: Me", "Who has access: Anyone"). The
- * Supabase database posts a JSON event here on every stage change and this
- * script sends one email per recipient from the deploying Google account.
+ * Runs every minute from a time-driven trigger, pulls pending notification
+ * events from the Supabase outbox and sends one email per recipient from
+ * the Google account that owns this script. No web app deployment needed.
  *
- * Setup: paste this file into a new Apps Script project (script.google.com),
- * replace TOKEN with a long random secret, Deploy → New deployment → Web app.
+ * Setup (once): paste this file into a new Apps Script project
+ * (script.google.com), fill in TOKEN (the same secret stored in Supabase
+ * Vault as `mailer_token`), then run the `setup` function from the editor
+ * and approve the permission prompt. That creates the every-minute trigger.
  */
-const TOKEN = 'PASTE-A-LONG-RANDOM-SECRET-HERE';
+const TOKEN = 'PASTE-THE-SAME-SECRET-AS-mailer_token';
+const SUPABASE_URL = 'https://rrnluvyammmlfjhtczod.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_klvoSJdP5MQR_cJXNrwk_g_nG6eP8yN';   // publishable key — not a secret
 const SENDER_NAME = 'Creative Request Ops';
 
-function doPost(e) {
-  try {
-    const p = JSON.parse(e.postData.contents || '{}');
-    if (!p.token || p.token !== TOKEN) return json_({ ok: false, error: 'unauthorized' });
-    const recipients = (p.recipients || []).filter((r) => r && r.email);
-    let sent = 0;
-    recipients.forEach((r) => {
-      const mail = render_(p, r);
-      MailApp.sendEmail({ to: r.email, subject: mail.subject, htmlBody: mail.html, name: SENDER_NAME, noReply: false });
-      sent++;
-    });
-    return json_({ ok: true, sent: sent });
-  } catch (err) {
-    return json_({ ok: false, error: String(err) });
-  }
+/** Run this once from the editor: installs the trigger and sends anything already queued. */
+function setup() {
+  ScriptApp.getProjectTriggers().forEach((t) => { if (t.getHandlerFunction() === 'pump') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('pump').timeBased().everyMinutes(1).create();
+  const n = pump();
+  Logger.log('Trigger installed. Sent ' + n + ' queued email(s).');
 }
 
-function doGet() { return json_({ ok: true, service: 'creative-request-ops-mailer' }); }
+/** Called by the trigger every minute. */
+function pump() {
+  const events = rpc_('mail_outbox_claim', { p_token: TOKEN, p_limit: 25 }) || [];
+  if (!events.length) return 0;
+  let sent = 0;
+  const results = events.map((ev) => {
+    try {
+      const p = ev.payload || {};
+      (p.recipients || []).filter((r) => r && r.email).forEach((r) => {
+        const mail = render_(p, r);
+        MailApp.sendEmail({ to: r.email, subject: mail.subject, htmlBody: mail.html, name: SENDER_NAME });
+        sent++;
+      });
+      return { id: ev.id, ok: true };
+    } catch (err) {
+      return { id: ev.id, ok: false, error: String(err).slice(0, 500) };
+    }
+  });
+  rpc_('mail_outbox_ack', { p_token: TOKEN, p_results: results });
+  return sent;
+}
 
-function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+function rpc_(fn, body) {
+  const res = UrlFetchApp.fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY },
+    payload: JSON.stringify(body),
+  });
+  const code = res.getResponseCode();
+  if (code >= 300) throw new Error('rpc ' + fn + ' → HTTP ' + code + ': ' + res.getContentText().slice(0, 200));
+  const txt = res.getContentText();
+  return txt ? JSON.parse(txt) : null;
+}
 
 /* ---------- templates ---------- */
 function render_(p, r) {
