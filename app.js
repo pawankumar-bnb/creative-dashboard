@@ -54,6 +54,7 @@ const DEFAULT_SETTINGS = {
   slaWarnAt: 0.75,
   roles: DEFAULT_ROLES,
   allowedDomains: ['bricknbolt.com'],
+  notifications: { enabled: true },
 };
 /* Dark-theme steps of the stage colours (validated as a set). */
 const DARK_COLORS = { '#1baf7a': '#199e70', '#4a3aa7': '#9085e9', '#eb6834': '#d95926', '#2a78d6': '#3987e5', '#0ca30c': '#3dbe3d', '#64748b': '#8b98ac', '#0e9384': '#2dd4bf', '#1f4fd1': '#7b98ff', '#c11574': '#ee5ea6' };
@@ -872,6 +873,7 @@ function viewSettings() {
     <div class="grid two">
       <div class="stack">
         <div class="panel" data-anim><div class="panel-head"><div><h2>Who can sign in</h2><div class="sub">Email domains that self-register as Requester</div></div></div><div class="panel-body"><div class="field"><label>Allowed domains</label><input class="input sm mono" data-ss="allowedDomains" value="${attr((st.allowedDomains || []).join(', '))}" placeholder="bricknbolt.com"><span class="hint">Comma-separated. Anyone else must be added under Team by an admin.</span></div></div></div>
+        <div class="panel" data-anim><div class="panel-head"><div><h2>Email notifications</h2><div class="sub">One email per stage change to the people involved</div></div><button class="switch" role="switch" aria-checked="${st.notifications && st.notifications.enabled !== false ? 'true' : 'false'}" data-action="toggle-notify" aria-label="Email notifications"></button></div><div class="panel-body"><p class="small muted">${S.backend === 'supabase' ? 'Raised → coordinator · Assigned → assignee · Sent for QC → coordinator · Rework → assignee · QC passed → requester &amp; admins · Approved → everyone on the task. The person who performed the action is not emailed. Sent from the admin\'s Brick&amp;Bolt account via the mailer script.' : 'Emails are sent only on the website with the shared database; this view has no mailer.'}</p></div></div>
         <div class="panel" data-anim><div class="panel-head"><div><h2>Turnaround clock</h2><div class="sub">How TAT and SLA hours are counted</div></div><button class="switch" role="switch" aria-checked="${w.enabled ? 'true' : 'false'}" data-action="toggle-wh" aria-label="Count working hours only"></button></div><div class="panel-body stack" style="gap:12px">
           <p class="small muted">${w.enabled ? 'Only working hours count. A 1-day TAT is one working day.' : 'Every hour counts, including nights and weekends. Turn on to count working hours only.'}</p>
           <div class="row wrap"><div class="field"><label>Day starts</label><select class="input sm" data-ss="start" ${w.enabled ? '' : 'disabled'}>${hours}</select></div><div class="field"><label>Day ends</label><select class="input sm" data-ss="end" ${w.enabled ? '' : 'disabled'}>${hours}</select></div></div>
@@ -1211,6 +1213,7 @@ document.addEventListener('click', async (e) => {
     case 'reset-flow': S.flowDraft = clone(S.flow); renderPage(false); toast('Changes discarded', 'info'); break;
     case 'save-flow': { const f = clone(S.flowDraft); const err = validateFlow(f); if (err) return toast(err, 'crit'); await saveFlow(f); S.flowDraft = clone(S.flow); renderPage(false); break; }
     case 'toggle-wh': S.settingsDraft.workHours.enabled = !S.settingsDraft.workHours.enabled; renderPage(false); break;
+    case 'toggle-notify': S.settingsDraft.notifications = { ...(S.settingsDraft.notifications || {}), enabled: !(S.settingsDraft.notifications && S.settingsDraft.notifications.enabled !== false) }; renderPage(false); break;
     case 'add-type': S.settingsDraft.types.push({ id: 'type-' + uid().slice(0, 5), name: '', team: 'design', tatHours: 72, from: '', goesTo: '' }); renderPage(false); setTimeout(() => { const last = $$('[data-ty="name"]').pop(); if (last) last.focus(); }, 0); break;
     case 'del-type': S.settingsDraft.types.splice(Number(act.dataset.i), 1); renderPage(false); break;
     case 'del-prio': S.settingsDraft.priorities.splice(Number(act.dataset.i), 1); renderPage(false); break;
@@ -1287,6 +1290,7 @@ function normalizeSettings(settings) {
   s.types = s.types.map((t) => typeof t === 'string' ? { id: slug(t), name: t, team: 'design', tatHours: 72 } : { tatHours: 72, team: 'design', ...t, id: t.id || slug(t.name) });
   if (!Array.isArray(s.allowedDomains)) s.allowedDomains = clone(DEFAULT_SETTINGS.allowedDomains);
   if (!Array.isArray(s.roles) || !s.roles.length) s.roles = clone(DEFAULT_ROLES);
+  s.notifications = { enabled: true, ...((settings && settings.notifications) || {}) };
   return s;
 }
 function subscribeAll() {

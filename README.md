@@ -28,6 +28,7 @@ Every stage is timed against its limit (coordinator SLA 24h, QC 24h, final appro
 | `samples.js` | Sample requests (marked `sample`) and the team roster for demo mode and first-run seeding |
 | `config.js` | Publishable keys for Clerk and Supabase (website only) |
 | `supabase/schema.sql`, `supabase/seed.sql` | Database schema + RLS, and the first-run seed |
+| `supabase/notifications.sql`, `mailer/Code.gs` | Stage-change email notifications: database trigger + Apps Script mailer |
 | `scripts/build-artifact.mjs` | Builds `dist/artifact.html` for the claude.ai Artifact viewer |
 | `.github/workflows/deploy.yml` | GitHub Pages deployment on push to `main` |
 
@@ -49,6 +50,10 @@ The app picks its identity and storage at start-up:
 Clerk must be configured with: Google enabled, the `bricknbolt.com` allow-list, the **Supabase integration** activated (adds `role: authenticated` to session tokens), and a session-token claim `"email": "{{user.primary_email_address}}"` (the RLS policies and the roster are keyed on it).
 
 Roles still live in the app's roster (Team page): a first-time sign-in on an allowed domain becomes a Requester; admins grant Coordinator / Graphic design / Video editing / Admin. `pawankumar@bricknbolt.com` is always an admin.
+
+## Email notifications
+
+`supabase/notifications.sql` installs a trigger that watches every request write and posts one JSON event per stage change to a mailer: **raised** → coordinator, **assigned / reassigned** → assignee (+ requester), **submitted for QC** → coordinator (+ requester), **rework** → assignee (+ requester), **QC passed** → requester + admins, **approved** → everyone on the task. The person who performed the action is never emailed. The mailer is `mailer/Code.gs`, a Google Apps Script web app that sends from the admin's Brick&Bolt account (deploy as *Execute as me / Anyone*; put the same secret in `TOKEN` and in Supabase Vault as `mailer_token`; put the web-app URL in `public.mailer_config`). Master switch: Settings → Email notifications.
 
 ## Run locally
 

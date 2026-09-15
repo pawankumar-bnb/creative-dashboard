@@ -19,6 +19,11 @@
 - Supabase third-party auth must list BOTH Clerk domains (dev `famous-weasel-9594.clerk.accounts.dev` and prod `clerk.creative.bricknbolt.com`).
 - Production Google sign-in needs custom OAuth credentials in Clerk (redirect URI `https://clerk.creative.bricknbolt.com/v1/oauth_callback`).
 
+## Email notifications
+
+- `supabase/notifications.sql` → trigger `docs_notify` on `public.docs` posts events via `pg_net` to the Apps Script mailer (`mailer/Code.gs`) — token in Vault (`mailer_token`), URL + app_url in `public.mailer_config` (RLS, no policies). Master switch = `config/settings.notifications.enabled` (Settings page).
+- Events: raised, assigned, reassigned, submitted, rework, qc_passed, approved, reopened, cancelled. Actor excluded from recipients.
+
 ## Data model reminders
 
 - Artifact viewer → `DbStore` (shared realtime `db`). Static hosting → `LocalStore` (per-browser demo mode) until a real backend adapter exists.
