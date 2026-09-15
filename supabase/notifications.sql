@@ -191,8 +191,12 @@ begin
       'round', coalesce((new.data ->> 'round')::int, 1),
       'priority', new.data ->> 'priority',
       'tatHours', (new.data ->> 'tatHours')::numeric,
-      'dueBy', case when ev in ('assigned', 'reassigned', 'rework', 'reopened') and (new.data ->> 'tatHours')::numeric > 0
-                    then to_char((now() + (new.data ->> 'tatHours')::numeric * interval '1 hour') at time zone 'Asia/Kolkata', 'Dy DD Mon, HH24:MI') end,
+      'dueBy', case
+                 when (new.data ->> 'tatDeadline') ~ '^[0-9]+$'
+                   then to_char(to_timestamp((new.data ->> 'tatDeadline')::numeric / 1000) at time zone 'Asia/Kolkata', 'Dy DD Mon, HH24:MI')
+                 when ev in ('assigned', 'reassigned', 'rework', 'reopened') and (new.data ->> 'tatHours')::numeric > 0
+                   then to_char((now() + (new.data ->> 'tatHours')::numeric * interval '1 hour') at time zone 'Asia/Kolkata', 'Dy DD Mon, HH24:MI')
+               end,
       'dueDate', new.data ->> 'dueDate',
       'requester', requester,
       'assignee', assignee,

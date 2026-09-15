@@ -665,3 +665,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 @media (max-width: 1023px) { .nav .clerk-user .name, .nav .clerk-user .role { display: none; } }
 .setup-banner { background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid color-mix(in srgb, var(--warn-mark) 40%, transparent); padding: 8px 24px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
 .setup-banner b { color: var(--ink); }
+
+/* ---------- TAT control ---------- */
+.tat-control { display: flex; flex-direction: column; gap: 6px; }
+.seg.sm { padding: 2px; }
+.seg.sm button { padding: 3px 10px; min-height: 26px; font-size: 12px; }
+input[type="datetime-local"].input.sm { min-height: 32px; }

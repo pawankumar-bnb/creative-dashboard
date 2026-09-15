@@ -344,15 +344,18 @@ const assigneeOf = (r) => { const w = workStage(); return w ? (r.assignees || {}
 
 /* ---------------- request metrics ---------------- */
 const currentVisit = (r) => (r.visits || []).find((v) => !v.exitedAt) || null;
-const visitElapsed = (v) => elapsedMs(v.enteredAt, v.exitedAt || now(), wh());
+/* A task with an absolute deadline is timed on the wall clock; everything else follows the working-hours setting. */
+const isDeadlineVisit = (v, r) => !!(r && r.tatDeadline && stageById(v.stage) && stageById(v.stage).slaFrom === 'task');
+const visitElapsed = (v, r) => isDeadlineVisit(v, r) ? Math.max(0, (v.exitedAt || now()) - v.enteredAt) : elapsedMs(v.enteredAt, v.exitedAt || now(), wh());
 /* The time limit for a stage on a given request: the per-task TAT for the work stage, else the stage SLA. */
-function stageLimitMs(st, r) { if (!st) return 0; if (st.slaFrom === 'task') return (Number(r && r.tatHours) || 0) * H; return (Number(st.slaHours) || 0) * H; }
-const visitBreached = (v, r) => { const st = stageById(v.stage); const lim = stageLimitMs(st, r); return lim > 0 && visitElapsed(v) > lim; };
-function stageTat(r, stageId) { return (r.visits || []).filter((v) => v.stage === stageId).reduce((a, v) => a + visitElapsed(v), 0); }
+function stageLimitMs(st, r, v) { if (!st) return 0; if (st.slaFrom === 'task') { if (r && r.tatDeadline && v) return Math.max(0, r.tatDeadline - v.enteredAt); return (Number(r && r.tatHours) || 0) * H; } return (Number(st.slaHours) || 0) * H; }
+const visitBreached = (v, r) => { const st = stageById(v.stage); const lim = stageLimitMs(st, r, v); if (isDeadlineVisit(v, r)) return (v.exitedAt || now()) > r.tatDeadline; return lim > 0 && visitElapsed(v, r) > lim; };
+function stageTat(r, stageId) { return (r.visits || []).filter((v) => v.stage === stageId).reduce((a, v) => a + visitElapsed(v, r), 0); }
 function slaState(r) {
   const st = stageById(r.stage), v = currentVisit(r);
-  if (!st || !v || r.status !== 'open') return { ratio: null, state: 'none', elapsed: v ? visitElapsed(v) : 0, limit: 0 };
-  const limit = stageLimitMs(st, r), elapsed = visitElapsed(v);
+  if (!st || !v || r.status !== 'open') return { ratio: null, state: 'none', elapsed: v ? visitElapsed(v, r) : 0, limit: 0 };
+  const limit = stageLimitMs(st, r, v), elapsed = visitElapsed(v, r);
+  if (isDeadlineVisit(v, r)) { const remaining = r.tatDeadline - now(); const ratio = limit > 0 ? elapsed / limit : 2; return { ratio, elapsed, limit, remaining, deadline: r.tatDeadline, state: remaining <= 0 ? 'crit' : ratio >= (S.settings.slaWarnAt || 0.75) ? 'warn' : 'ok' }; }
   if (!limit) return { ratio: null, state: 'none', elapsed, limit: 0 };
   const ratio = elapsed / limit;
   return { ratio, elapsed, limit, remaining: limit - elapsed, deadline: addWorkMs(v.enteredAt, limit, wh()), state: ratio >= 1 ? 'crit' : ratio >= (S.settings.slaWarnAt || 0.75) ? 'warn' : 'ok' };
@@ -397,13 +400,14 @@ function enterStage(r, stageId) {
 function finalizeResult(r) {
   const w = workStage(); const a = w ? (r.assignees || {})[w.id] : null;
   const prod = w ? (r.visits || []).filter((v) => v.stage === w.id) : [];
-  const actualMs = prod.reduce((s, v) => s + visitElapsed(v), 0);
-  const firstMs = prod.length ? visitElapsed(prod[0]) : 0;
+  const actualMs = prod.reduce((s, v) => s + visitElapsed(v, r), 0);
+  const firstMs = prod.length ? visitElapsed(prod[0], r) : 0;
   const stageHours = {}; stages().forEach((s) => { if (s.kind !== 'start' && s.kind !== 'end') stageHours[s.id] = Math.round(stageTat(r, s.id) / H * 10) / 10; });
   r.result = {
     assignee: pick(a), team: r.team || null, targetHours: Number(r.tatHours) || 0,
     actualHours: Math.round(actualMs / H * 10) / 10, firstRoundHours: Math.round(firstMs / H * 10) / 10, rounds: r.round || 1,
-    met: !(Number(r.tatHours) > 0) || actualMs <= Number(r.tatHours) * H,
+    met: r.tatDeadline ? now() <= r.tatDeadline || (prod.length && (prod[prod.length - 1].exitedAt || now()) <= r.tatDeadline) : (!(Number(r.tatHours) > 0) || actualMs <= Number(r.tatHours) * H),
+    deadline: r.tatDeadline || null,
     approvedAt: now(), approvedBy: pick(S.me), stageHours, totalHours: Math.round(elapsedMs(r.createdAt, now(), wh()) / H * 10) / 10,
   };
 }
@@ -440,9 +444,11 @@ async function createRequest(f) {
   return r;
 }
 /* Steps 4, 5, 7 — the coordinator writes the brief, picks the team and person, and sets the TAT. */
+function applyTat(r, tat) { if (!tat || !(tat.hours > 0)) return; r.tatHours = tat.hours; r.tatDeadline = tat.deadline || null; r.tatMode = tat.deadline ? 'deadline' : 'hours'; }
+const tatLabel = (r) => r.tatDeadline ? `by ${fmtDeadline(r.tatDeadline)}` : fmtTat(r.tatHours);
 async function actSaveBrief(id, f) {
   const r = clone(getReq(id));
-  r.brief = f.brief; if (f.team) r.team = f.team; if (f.tatHours > 0) r.tatHours = f.tatHours;
+  r.brief = f.brief; if (f.team) r.team = f.team; applyTat(r, f.tat);
   r.thread.push(sysMsg('updated the creative brief'));
   await saveRequest(r, 'Brief saved');
 }
@@ -452,12 +458,12 @@ async function actAssign(id, f) {
   const m = activeMembers().find((x) => sameEmail(x.email, f.email));
   if (!m) return toast('Choose who will work on it.', 'crit');
   if (!String(f.brief || '').trim()) return toast('Write the creative brief before assigning.', 'crit');
-  if (!(f.tatHours > 0)) return toast('Set the TAT for this task.', 'crit');
-  r.brief = f.brief.trim(); r.team = f.team || r.team; r.tatHours = f.tatHours;
+  if (!f.tat || !(f.tat.hours > 0)) return toast('Set the TAT for this task.', 'crit');
+  r.brief = f.brief.trim(); r.team = f.team || r.team; applyTat(r, f.tat);
   r.assignees ||= {}; r.assignees[w.id] = pick(m); r.assignedAt = now();
   if (st.kind === 'triage') { closeVisit(r, 'assigned'); enterStage(r, w.id); }
-  r.thread.push(sysMsg(`briefed and assigned to ${m.name} · TAT ${fmtTat(f.tatHours)}`));
-  await saveRequest(r, `${r.id} assigned to ${m.name} · TAT ${fmtTat(f.tatHours)}`);
+  r.thread.push(sysMsg(`briefed and assigned to ${m.name} · TAT ${tatLabel(r)}`));
+  await saveRequest(r, `${r.id} assigned to ${m.name} · TAT ${tatLabel(r)}`);
 }
 async function actReassign(id, email) {
   const r = clone(getReq(id)); const w = workStage();
@@ -467,10 +473,10 @@ async function actReassign(id, email) {
   r.thread.push(sysMsg(`reassigned production to ${m.name}`));
   await saveRequest(r, `Reassigned to ${m.name}`);
 }
-async function actSetTat(id, hours) {
-  const r = clone(getReq(id)); if (!(hours > 0)) return toast('TAT must be more than zero.', 'crit');
-  r.tatHours = hours; r.thread.push(sysMsg(`set the TAT to ${fmtTat(hours)}`));
-  await saveRequest(r, `TAT set to ${fmtTat(hours)}`);
+async function actSetTat(id, tat) {
+  const r = clone(getReq(id)); if (!tat || !(tat.hours > 0)) return toast('TAT must be more than zero.', 'crit');
+  applyTat(r, tat); r.thread.push(sysMsg(`set the TAT to ${tatLabel(r)}`));
+  await saveRequest(r, `TAT set to ${tatLabel(r)}`);
 }
 /* Step 8 — the assignee submits; the QC task appears for the coordinator. */
 async function actSubmit(id) {
@@ -573,7 +579,7 @@ function metrics() {
   const tatMet = withResult.length ? withResult.filter((r) => r.result.met).length / withResult.length : null;
   const wip = boardStages().filter((s) => s.kind !== 'end').map((s) => ({ stage: s, count: open.filter((r) => r.stage === s.id).length, breached: open.filter((r) => r.stage === s.id && isBreachedNow(r)).length }));
   const tat = stages().filter((s) => s.kind === 'triage' || s.kind === 'work' || s.kind === 'review').map((s) => {
-    const vs = [], lims = []; S.requests.forEach((r) => (r.visits || []).forEach((v) => { if (v.stage === s.id && v.exitedAt) { vs.push(visitElapsed(v)); lims.push(stageLimitMs(s, r)); } }));
+    const vs = [], lims = []; S.requests.forEach((r) => (r.visits || []).forEach((v) => { if (v.stage === s.id && v.exitedAt) { vs.push(visitElapsed(v, r)); lims.push(stageLimitMs(s, r, v)); } }));
     const avg = vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
     const limit = s.slaFrom === 'task' ? (lims.length ? lims.reduce((a, b) => a + b, 0) / lims.length : 0) : stageLimitMs(s, null);
     return { stage: s, avg, n: vs.length, limit, limitLabel: s.slaFrom === 'task' ? 'avg TAT' : 'SLA' };
@@ -635,7 +641,7 @@ function slaLine(r, compact = false) {
   if (s.state === 'none') return `<div class="meter none"></div><div class="sla-line"><span>${compact ? 'In stage' : 'In ' + esc(st ? st.name : '')}</span><span class="t">${fmtDur(s.elapsed)} · no limit</span></div>`;
   const pct = clamp(s.ratio * 100, 0, 100); const isTat = st && st.slaFrom === 'task';
   const label = s.state === 'crit' ? `<span class="crit">${isTat ? 'TAT' : 'SLA'} over by ${fmtDur(-s.remaining)}</span>` : s.state === 'warn' ? `<span class="warn">${fmtDur(s.remaining)} left</span>` : `<span>${fmtDur(s.remaining)} left</span>`;
-  return `<div class="meter ${s.state === 'ok' ? '' : s.state}"><i style="width:${pct.toFixed(1)}%"></i></div><div class="sla-line"><span class="t">${fmtDur(s.elapsed)} / ${isTat ? fmtTat(r.tatHours) : st.slaHours + 'h'}</span>${label}</div>`;
+  return `<div class="meter ${s.state === 'ok' ? '' : s.state}"><i style="width:${pct.toFixed(1)}%"></i></div><div class="sla-line"><span class="t">${isTat && r.tatDeadline ? 'due ' + fmtDeadline(r.tatDeadline) : fmtDur(s.elapsed) + ' / ' + (isTat ? fmtTat(r.tatHours) : st.slaHours + 'h')}</span>${label}</div>`;
 }
 function cardHtml(r) {
   const st = stageById(r.stage); const a = personFor(r); const breached = isBreachedNow(r); const due = fmtDue(r.dueDate, r.status);
@@ -867,8 +873,8 @@ function viewSettings() {
   const dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   return `<div class="page-head" data-anim><div><h1>Settings</h1><p class="lede">Request types and their default TAT, who may sign in, how time is counted, and housekeeping.</p></div><div class="page-actions"><button class="btn primary" data-action="save-settings">${ic('check')}Save settings</button></div></div>
   <div class="stack">
-    <div class="panel" data-anim><div class="panel-head"><div><h2>Request types &amp; default TAT</h2><div class="sub">The TAT here is the default the coordinator sees at assignment — she can change it per task</div></div><button class="btn sm" data-action="add-type">${ic('plus', 'sm')}Add type</button></div><div class="table-wrap" style="padding:0 6px 8px"><table class="tbl"><thead><tr><th>Type</th><th>Team</th><th>Default TAT</th><th>Usually from</th><th>Usually goes to</th><th></th></tr></thead><tbody>
-      ${st.types.map((t, i) => `<tr><td><input class="input sm" data-ty="name" data-i="${i}" value="${attr(t.name)}" aria-label="Type name"></td><td><select class="input sm" data-ty="team" data-i="${i}" aria-label="Team">${TEAMS.map((tm) => `<option value="${attr(tm.id)}" ${t.team === tm.id ? 'selected' : ''}>${esc(tm.name)}</option>`).join('')}</select></td><td><div class="row" style="gap:6px"><input class="input sm" type="number" min="0.5" step="0.5" style="width:84px" data-ty="tatDays" data-i="${i}" value="${attr(Math.round((t.tatHours / 24) * 10) / 10)}" aria-label="TAT in days"><span class="small muted">days</span></div></td><td><input class="input sm" data-ty="from" data-i="${i}" value="${attr(t.from || '')}" placeholder="—"></td><td><input class="input sm" data-ty="goesTo" data-i="${i}" value="${attr(t.goesTo || '')}" placeholder="—"></td><td class="actions"><button class="btn ghost sm icon-only" data-action="del-type" data-i="${i}" aria-label="Remove ${attr(t.name)}">${ic('trash', 'sm')}</button></td></tr>`).join('')}
+    <div class="panel" data-anim><div class="panel-head"><div><h2>Request types &amp; default TAT</h2><div class="sub">The TAT here is the default the coordinator sees at assignment — she can change it per task</div></div><button class="btn sm" data-action="add-type">${ic('plus', 'sm')}Add type</button></div><div class="table-wrap" style="padding:0 6px 8px"><table class="tbl"><thead><tr><th>Type</th><th>Team</th><th>Default TAT (hours)</th><th>Usually from</th><th>Usually goes to</th><th></th></tr></thead><tbody>
+      ${st.types.map((t, i) => `<tr><td><input class="input sm" data-ty="name" data-i="${i}" value="${attr(t.name)}" aria-label="Type name"></td><td><select class="input sm" data-ty="team" data-i="${i}" aria-label="Team">${TEAMS.map((tm) => `<option value="${attr(tm.id)}" ${t.team === tm.id ? 'selected' : ''}>${esc(tm.name)}</option>`).join('')}</select></td><td><div class="row" style="gap:6px"><input class="input sm" type="number" min="1" step="1" style="width:84px" data-ty="tatHoursIn" data-i="${i}" value="${attr(t.tatHours)}" aria-label="TAT in hours"><span class="small muted">h <span class="tiny">(${fmtTat(t.tatHours)})</span></span></div></td><td><input class="input sm" data-ty="from" data-i="${i}" value="${attr(t.from || '')}" placeholder="—"></td><td><input class="input sm" data-ty="goesTo" data-i="${i}" value="${attr(t.goesTo || '')}" placeholder="—"></td><td class="actions"><button class="btn ghost sm icon-only" data-action="del-type" data-i="${i}" aria-label="Remove ${attr(t.name)}">${ic('trash', 'sm')}</button></td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="grid two">
       <div class="stack">
@@ -911,7 +917,20 @@ function limitChip(r) {
   if (s.state === 'crit') return `<span class="chip crit">${ic('alert', 'sm')}${word} over by ${fmtDur(-s.remaining)}</span>`;
   return `<span class="chip ${s.state === 'warn' ? 'warn' : 'good'}">${fmtDur(s.remaining)} left · due ${fmtDeadline(s.deadline)}</span>`;
 }
-function tatInput(hours, name = 'tatDays') { return `<div class="row" style="gap:6px"><input class="input sm" type="number" min="0.5" step="0.5" name="${name}" value="${attr(Math.round(((hours || 0) / 24) * 10) / 10 || '')}" style="width:88px" aria-label="TAT in days"><span class="small muted">days</span></div>`; }
+function localDT(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+/* TAT can be given as a total number of hours or as an exact date & time. */
+function tatInput(hours, deadline) {
+  const mode = deadline ? 'deadline' : 'hours'; const h = Number(hours) || 24;
+  const dflt = deadline || (() => { const d = new Date(now() + h * H); d.setMinutes(0, 0, 0); return d.getTime() + H; })();
+  return `<div class="tat-control"><div class="seg sm" role="tablist"><button type="button" role="tab" class="${mode === 'hours' ? 'active' : ''}" data-tat-mode="hours">Hours</button><button type="button" role="tab" class="${mode === 'deadline' ? 'active' : ''}" data-tat-mode="deadline">Date &amp; time</button></div><input type="hidden" name="tatMode" value="${mode}">
+    <div class="row" data-tat-pane="hours" ${mode === 'hours' ? '' : 'hidden'} style="gap:6px"><input class="input sm" type="number" min="0.5" step="0.5" name="tatHours" value="${attr(h)}" style="width:92px" aria-label="TAT in hours"><span class="small muted">hours</span><span class="tiny muted" data-tat-hint>${h % 24 === 0 ? '= ' + fmtTat(h) : ''}</span></div>
+    <div class="row" data-tat-pane="deadline" ${mode === 'deadline' ? '' : 'hidden'} style="gap:6px"><input class="input sm" type="datetime-local" name="tatDeadline" value="${attr(localDT(dflt))}" aria-label="TAT deadline"><span class="tiny muted" data-tat-hint>= ${fmtDur(dflt - now())} from now</span></div></div>`;
+}
+function readTat(form) {
+  const mode = (form.querySelector('[name=tatMode]') || {}).value || 'hours';
+  if (mode === 'deadline') { const v = (form.querySelector('[name=tatDeadline]') || {}).value; const t = v ? new Date(v).getTime() : NaN; if (!t || isNaN(t)) { toast('Pick the date and time the task is due.', 'crit'); return null; } if (t <= now()) { toast('The TAT deadline must be in the future.', 'crit'); return null; } return { hours: Math.max(0.5, Math.round(((t - now()) / H) * 2) / 2), deadline: t }; }
+  const h = Number((form.querySelector('[name=tatHours]') || {}).value); if (!(h > 0)) { toast('Enter the TAT in hours.', 'crit'); return null; } return { hours: h, deadline: null };
+}
 function actionPanelHtml(r) {
   const st = stageById(r.stage); if (!st) return `<div class="action-panel"><h3>Unknown stage</h3><p class="small muted">This request is in a stage that no longer exists in the flow (${esc(r.stage)}). An admin can reopen it.</p>${isAdmin() ? `<div class="actions"><button class="btn sm" data-action="reopen">${ic('rotate', 'sm')}Move to production</button></div>` : ''}</div>`;
   if (r.status === 'cancelled') return `<div class="action-panel"><h3>Cancelled</h3><p class="small muted">This request was cancelled${r.updatedAt ? ' ' + fmtRel(r.updatedAt) : ''}.</p>${canEditRequest(r) ? `<div class="actions"><button class="btn sm" data-action="reopen">${ic('rotate', 'sm')}Reopen</button></div>` : ''}</div>`;
@@ -927,17 +946,17 @@ function actionPanelHtml(r) {
       <div class="row wrap" style="gap:12px;align-items:flex-end">
         <div class="field"><label for="t-team">Team</label><select class="input sm" id="t-team" name="team" data-triage-team>${TEAMS.map((t) => `<option value="${attr(t.id)}" ${team === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
         <div class="field" style="flex:1;min-width:180px"><label for="t-who">Assign to</label><select class="input sm" id="t-who" name="email" data-triage-who><option value="">${eligible.length ? 'Choose…' : 'No one on this team yet'}</option>${eligible.map((m) => `<option value="${attr(m.email)}" ${(current && sameEmail(current.email, m.email)) || (!current && suggested && sameEmail(suggested.email, m.email)) ? 'selected' : ''}>${esc(m.name)}${suggested && sameEmail(suggested.email, m.email) ? ' (usual)' : ''}</option>`).join('')}</select></div>
-        <div class="field"><label for="t-tat">TAT for this task</label>${tatInput(r.tatHours)}</div>
+        <div class="field"><label>TAT for this task</label>${tatInput(r.tatHours, r.tatDeadline)}</div>
       </div>
-      <div class="row between wrap"><span class="tiny muted">Default for ${esc(r.type)}: ${fmtTat(ty ? ty.tatHours : r.tatHours)}. The TAT clock starts the moment you assign.</span><div class="actions"><button class="btn sm" type="button" data-action="save-brief">Save brief</button><button class="btn sm primary" type="submit">${ic('arrowRight', 'sm')}Assign &amp; start production</button></div></div>
+      <div class="row between wrap"><span class="tiny muted">Default for ${esc(r.type)}: ${fmtTat(ty ? ty.tatHours : r.tatHours)}. Give a total number of hours, or the exact date &amp; time it is due. The clock starts the moment you assign.</span><div class="actions"><button class="btn sm" type="button" data-action="save-brief">Save brief</button><button class="btn sm primary" type="submit">${ic('arrowRight', 'sm')}Assign &amp; start production</button></div></div>
     </form>`;
   }
   if (st.kind === 'work') {
     const a = (r.assignees || {})[st.id]; const roundFiles = (r.deliverables || []).filter((d) => d.round === r.round); const needFile = st.needsFile && !roundFiles.length;
     const s = slaState(r); const team = r.team || 'design'; const eligible = membersWithRole(team);
-    const manage = canManageAssignment(r) ? `<form class="row wrap" data-form="reassign" style="gap:8px;align-items:flex-end"><div class="field"><label>Reassign</label><select class="input sm" name="email" style="min-width:160px"><option value="">Choose…</option>${eligible.map((m) => `<option value="${attr(m.email)}" ${a && sameEmail(a.email, m.email) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div><button class="btn sm" type="submit">Reassign</button><div class="field"><label>TAT</label>${tatInput(r.tatHours)}</div><button class="btn sm" type="button" data-action="set-tat">Update TAT</button></form>` : '';
+    const manage = canManageAssignment(r) ? `<form class="row wrap" data-form="reassign" style="gap:8px;align-items:flex-end"><div class="field"><label>Reassign</label><select class="input sm" name="email" style="min-width:160px"><option value="">Choose…</option>${eligible.map((m) => `<option value="${attr(m.email)}" ${a && sameEmail(a.email, m.email) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div><button class="btn sm" type="submit">Reassign</button><div class="field"><label>TAT</label>${tatInput(r.tatHours, r.tatDeadline)}</div><button class="btn sm" type="button" data-action="set-tat">Update TAT</button></form>` : '';
     return `<div class="action-panel"><div class="row between wrap"><h3>${esc(st.name)} · round ${r.round || 1}</h3>${lim}</div>
-      <div class="row between wrap"><span class="who">${personHtml(a)}<span class="name">${a ? esc(a.name) + (isMe(a) ? ' (you)' : '') : 'Nobody assigned'}</span></span><span class="small muted">TAT <b class="mono">${fmtTat(r.tatHours)}</b>${s.deadline ? ` · due ${fmtDeadline(s.deadline)}` : ''}${r.assignedAt ? ` · assigned ${fmtRel(r.assignedAt)}` : ''}</span></div>
+      <div class="row between wrap"><span class="who">${personHtml(a)}<span class="name">${a ? esc(a.name) + (isMe(a) ? ' (you)' : '') : 'Nobody assigned'}</span></span><span class="small muted">${r.tatDeadline ? `Due <b class="mono">${fmtDeadline(r.tatDeadline)}</b> <span class="muted">(${fmtTat(r.tatHours)} window)</span>` : `TAT <b class="mono">${fmtTat(r.tatHours)}</b>${s.deadline ? ` · due ${fmtDeadline(s.deadline)}` : ''}`}${r.assignedAt ? ` · assigned ${fmtRel(r.assignedAt)}` : ''}</span></div>
       ${canSubmitWork(r, st) ? `<div class="divider" style="margin:4px 0"></div><div class="row between wrap"><span class="small muted">${needFile ? 'Add the final file link below, then submit for QC.' : `Ready? Submit it to ${esc(coordinatorNames())} for QC.`}</span><div class="actions"><button class="btn sm primary" data-action="submit" ${needFile ? 'disabled' : ''}>${ic('send', 'sm')}Submit for QC</button></div></div>` : `<p class="small muted">${a ? `${esc(a.name)} is working on this.` : 'Waiting for the coordinator to assign it.'}</p>`}
       ${manage ? `<div class="divider" style="margin:4px 0"></div>${manage}` : ''}
     </div>`;
@@ -955,10 +974,10 @@ function actionPanelHtml(r) {
 }
 function drawerHtml(r) {
   const st = stageById(r.stage); const due = fmtDue(r.dueDate, r.status);
-  const visitsTl = (r.visits || []).map((v) => { const s = stageById(v.stage) || { name: v.stage, color: '#888' }; const el = visitElapsed(v); const lim = stageLimitMs(s, r); const br = lim > 0 && el > lim; const open = !v.exitedAt;
+  const visitsTl = (r.visits || []).map((v) => { const s = stageById(v.stage) || { name: v.stage, color: '#888' }; const el = visitElapsed(v, r); const lim = stageLimitMs(s, r, v); const br = visitBreached(v, r); const open = !v.exitedAt;
     const what = s.kind === 'start' ? `<b>${esc(r.requester ? r.requester.name : '')}</b> raised the request` : open ? `In <b>${esc(s.name)}</b>${v.assignee ? ` with ${esc(v.assignee.name)}` : ''} since ${fmtDateTime(v.enteredAt)}` : `<b>${esc(s.name)}</b> ${{ assigned: 'done — briefed and assigned', submitted: 'submitted for QC', approved: 'approved', edits: 'sent back for changes', cancelled: 'cancelled', reopened: 'reopened' }[v.action] || v.action || 'closed'}${v.by ? ` by ${esc(v.by.name)}` : ''}`;
     return `<div class="tl" style="--stage:${attr(themed(s.color))}"><div class="dot ${open ? '' : 'filled'}"></div><div><div class="t-main">${what}${v.round > 1 ? ` <span class="round">R${v.round}</span>` : ''}</div><div class="t-sub"><span>${fmtDateTime(v.enteredAt)}${v.exitedAt && s.kind !== 'start' ? ' → ' + fmtDateTime(v.exitedAt) : ''}</span>${s.kind !== 'start' && s.kind !== 'end' ? `<span>${s.slaFrom === 'task' ? 'TAT' : 'time'} ${fmtDur(el)}${lim ? ` / ${fmtDur(lim)}` : ''}</span>${lim ? `<span class="${br ? 'crit' : 'good'}">${br ? 'over' : 'within limit'}</span>` : ''}` : ''}</div></div></div>`; }).join('');
-  return `<div class="drawer-head"><div class="grow"><div class="row wrap" style="gap:8px"><span class="mono small muted">${esc(r.id)}</span>${stageChip(st)}${teamChip(r.team)}${r.status === 'cancelled' ? '<span class="chip">Cancelled</span>' : ''}${isBreachedNow(r) ? `<span class="breach-flag pulse">${ic('alert')}over limit</span>` : ''}${r.round > 1 ? `<span class="round">Round ${r.round}</span>` : ''}${r.sample ? '<span class="chip">sample</span>' : ''}</div><h2>${esc(r.title)}</h2><div class="row wrap" style="gap:10px;margin-top:8px"><span class="chip outline">${esc(r.type)}</span>${prioHtml(r.priority)}<span class="small ${due.cls}">${ic('calendar', 'sm')} ${esc(due.text)}</span><span class="who" title="Raised by">${personHtml(r.requester, 'sm')}<span class="name small">${esc(r.requester ? r.requester.name : '')}</span></span>${assigneeOf(r) ? `<span class="who" title="Assignee">${personHtml(assigneeOf(r), 'sm')}<span class="name small">${esc(assigneeOf(r).name)} · TAT ${fmtTat(r.tatHours)}</span></span>` : ''}</div></div>
+  return `<div class="drawer-head"><div class="grow"><div class="row wrap" style="gap:8px"><span class="mono small muted">${esc(r.id)}</span>${stageChip(st)}${teamChip(r.team)}${r.status === 'cancelled' ? '<span class="chip">Cancelled</span>' : ''}${isBreachedNow(r) ? `<span class="breach-flag pulse">${ic('alert')}over limit</span>` : ''}${r.round > 1 ? `<span class="round">Round ${r.round}</span>` : ''}${r.sample ? '<span class="chip">sample</span>' : ''}</div><h2>${esc(r.title)}</h2><div class="row wrap" style="gap:10px;margin-top:8px"><span class="chip outline">${esc(r.type)}</span>${prioHtml(r.priority)}<span class="small ${due.cls}">${ic('calendar', 'sm')} ${esc(due.text)}</span><span class="who" title="Raised by">${personHtml(r.requester, 'sm')}<span class="name small">${esc(r.requester ? r.requester.name : '')}</span></span>${assigneeOf(r) ? `<span class="who" title="Assignee">${personHtml(assigneeOf(r), 'sm')}<span class="name small">${esc(assigneeOf(r).name)} · TAT ${tatLabel(r)}</span></span>` : ''}</div></div>
     <div class="row">${canEditRequest(r) ? `<button class="btn ghost sm icon-only" data-action="edit" data-id="${attr(r.id)}" aria-label="Edit request">${ic('edit', 'sm')}</button>` : ''}<button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${ic('x')}</button></div></div>
   <div class="drawer-body">
     ${stepperHtml(r)}
@@ -1153,7 +1172,7 @@ function csvExport() {
   const head = ['Task ID', 'Title', 'Type', 'Team', 'Priority', 'Status', 'Stage', 'Round', 'Requester', 'Assignee', 'Raised', 'Assigned', 'Due', 'Approved', 'Approved by', 'TAT target (h)', 'Production TAT (h)', 'TAT met', 'End-to-end (h)', ...sts.flatMap((s) => [`${s.name} time (h)`, `${s.name} limit (h)`, `${s.name} result`])];
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const iso = (ts) => ts ? new Date(ts).toISOString() : '';
-  const rows = S.requests.map((r) => { const a = assigneeOf(r); const res = r.result; return [r.id, r.title, r.type, teamName(r.team), r.priority, r.status, (stageById(r.stage) || {}).name, r.round || 1, r.requester ? r.requester.name : '', a ? a.name : '', iso(r.createdAt), iso(r.assignedAt), r.dueDate || '', iso(r.completedAt), res && res.approvedBy ? res.approvedBy.name : '', r.tatHours || '', res ? res.actualHours : (productionTat(r) / H).toFixed(1), res ? (res.met ? 'yes' : 'no') : '', (totalTat(r) / H).toFixed(1), ...sts.flatMap((s) => { const vs = (r.visits || []).filter((v) => v.stage === s.id); if (!vs.length) return ['', stageLimitMs(s, r) / H || '', '']; const t = stageTat(r, s.id); const lim = stageLimitMs(s, r); return [(t / H).toFixed(1), lim / H || '', vs.some((v) => visitBreached(v, r)) ? 'over' : lim ? 'within' : 'no limit']; })]; });
+  const rows = S.requests.map((r) => { const a = assigneeOf(r); const res = r.result; return [r.id, r.title, r.type, teamName(r.team), r.priority, r.status, (stageById(r.stage) || {}).name, r.round || 1, r.requester ? r.requester.name : '', a ? a.name : '', iso(r.createdAt), iso(r.assignedAt), r.dueDate || '', iso(r.completedAt), res && res.approvedBy ? res.approvedBy.name : '', r.tatHours || '', res ? res.actualHours : (productionTat(r) / H).toFixed(1), res ? (res.met ? 'yes' : 'no') : '', (totalTat(r) / H).toFixed(1), ...sts.flatMap((s) => { const vs = (r.visits || []).filter((v) => v.stage === s.id); if (!vs.length) return ['', stageLimitMs(s, r) / H || '', '']; const t = stageTat(r, s.id); const lim = stageLimitMs(s, r, vs[0]); return [(t / H).toFixed(1), lim / H || '', vs.some((v) => visitBreached(v, r)) ? 'over' : lim ? 'within' : 'no limit']; })]; });
   return [head, ...rows].map((r) => r.map(q).join(',')).join('\n');
 }
 async function doExport() {
@@ -1180,6 +1199,7 @@ function noteBox(opts) { return new Promise((res) => { S.modal = { type: 'note',
 
 document.addEventListener('click', async (e) => {
   const openEl = e.target.closest('[data-open]'); if (openEl && !e.target.closest('a')) { openRequest(openEl.dataset.open); return; }
+  const modeBtn = e.target.closest('[data-tat-mode]'); if (modeBtn) { const box = modeBtn.closest('.tat-control'); const mode = modeBtn.dataset.tatMode; box.querySelector('[name=tatMode]').value = mode; $$('[data-tat-mode]', box).forEach((b) => b.classList.toggle('active', b === modeBtn)); $$('[data-tat-pane]', box).forEach((p) => { p.hidden = p.dataset.tatPane !== mode; }); return; }
   const rangeEl = e.target.closest('[data-range]'); if (rangeEl) { S.throughputRange = rangeEl.dataset.range; localStorage.setItem('relay.throughput', S.throughputRange); renderPage(false); return; }
   const modeEl = e.target.closest('[data-mode]'); if (modeEl) { S.boardMode = modeEl.dataset.mode; localStorage.setItem(LS.boardMode, S.boardMode); renderPage(false); return; }
   const tog = e.target.closest('[data-toggle]'); if (tog) { S.filters[tog.dataset.toggle] = !S.filters[tog.dataset.toggle]; renderPage(false); return; }
@@ -1196,8 +1216,8 @@ document.addEventListener('click', async (e) => {
     case 'gate-back': S.gatePending = null; renderAll(false); break;
     case 'signout': if (S.authMode === 'clerk' && S.clerk) { try { await S.clerk.signOut(); } catch (e) { /* ignore */ } location.assign(pageUrl()); return; } localStorage.removeItem(LS.me); S.me = null; S.drawer = null; S.modal = null; S.flowDraft = null; S.settingsDraft = null; S.gatePending = null; renderAll(true); break;
     case 'edit': openModal({ type: 'edit', id }); break;
-    case 'save-brief': { const form = act.closest('form'); const f = formData(form); await actSaveBrief(id, { brief: (f.brief || '').trim(), team: f.team, tatHours: daysToHours(f.tatDays) }); break; }
-    case 'set-tat': { const form = act.closest('form'); const f = formData(form); await actSetTat(id, daysToHours(f.tatDays)); break; }
+    case 'save-brief': { const form = act.closest('form'); const f = formData(form); const tat = readTat(form); if (!tat) return; await actSaveBrief(id, { brief: (f.brief || '').trim(), team: f.team, tat }); break; }
+    case 'set-tat': { const form = act.closest('form'); const tat = readTat(form); if (!tat) return; await actSetTat(id, tat); break; }
     case 'submit': await actSubmit(id); break;
     case 'reopen': if (await confirmBox({ title: 'Reopen this task?', sub: 'It goes back into production as a new round.', confirm: 'Reopen' })) await actReopen(id); break;
     case 'cancel': { const note = await noteBox({ kind: 'cancel', title: 'Cancel this request?', sub: 'It leaves the board but stays in the list for reporting.', label: 'Reason (optional)', required: false, confirm: 'Cancel request', danger: true }); if (note === false) return; await actCancel(id, note); break; }
@@ -1239,7 +1259,7 @@ document.addEventListener('submit', async (e) => {
     case 'bootstrap': { const doc = { email: lower(f.email), name: f.name.trim(), roles: ['admin', 'requester'], active: true }; await saveMember(doc, true); localStorage.setItem(LS.me, doc.email); S.me = S.members.find((x) => sameEmail(x.email, doc.email)); S.bootstrap = false; renderAll(true); break; }
     case 'new': { const d = parseRequestForm(form); if (!d) return; form.querySelector('[type=submit]').disabled = true; closeModal(); const r = await createRequest(d); openRequest(r.id); break; }
     case 'edit': { const d = parseRequestForm(form); if (!d) return; closeModal(); await actEdit(form.dataset.id, d); break; }
-    case 'triage': await actAssign(S.drawer, { brief: (f.brief || '').trim(), team: f.team, email: f.email, tatHours: daysToHours(f.tatDays) }); break;
+    case 'triage': { const tat = readTat(form); if (!tat) return; await actAssign(S.drawer, { brief: (f.brief || '').trim(), team: f.team, email: f.email, tat }); break; }
     case 'reassign': if (!f.email) return toast('Choose who to reassign to.', 'info'); await actReassign(S.drawer, f.email); break;
     case 'member': { const rolesSel = [].concat(f.roles || []); if (!rolesSel.length) return toast('Pick at least one role.', 'crit'); const existing = form.dataset.id ? S.members.find((x) => x.id === form.dataset.id) : null; const newEmail = lower(f.email); if (S.members.some((x) => sameEmail(x.email, newEmail) && (!existing || x.id !== existing.id))) return toast('That email is already on the team.', 'crit'); const wasAdminSelf = existing && isMe(existing) && hasRole(existing, 'admin'); if (wasAdminSelf && !rolesSel.includes('admin') && !sameEmail(existing.email, APP.ownerEmail)) return toast('You cannot remove your own admin role.', 'crit'); closeModal(); if (existing && !sameEmail(existing.email, newEmail)) { await removeMemberQuiet(existing.id); } await saveMember({ ...(existing || {}), email: newEmail, name: f.name, roles: rolesSel, active: existing ? !!f.active : true, emailUnconfirmed: undefined }, !existing); if (existing && isMe(existing)) { const me = S.members.find((x) => sameEmail(x.email, newEmail)); if (me) { S.me = me; localStorage.setItem(LS.me, newEmail); } } renderAll(false); break; }
     case 'role': { const s = clone(S.settings); s.roles = roles().slice(); const rid = slug(f.name); if (s.roles.some((r) => r.id === rid)) return toast('A role with that name already exists.', 'crit'); s.roles.push({ id: rid, name: f.name.trim(), color: f.color || '#0E9384', desc: (f.desc || '').trim() }); closeModal(); await saveSettings(s, 'Role added'); S.settingsDraft = null; break; }
@@ -1253,9 +1273,10 @@ async function removeMemberQuiet(id) { S.members = S.members.filter((m) => m.id 
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'q') { S.q = t.value; clearTimeout(S._qT); S._qT = setTimeout(() => renderPage(false), 120); return; }
+  if (t.name === 'tatHours' || t.name === 'tatDeadline') { const pane = t.closest('[data-tat-pane]'); const hint = pane && pane.querySelector('[data-tat-hint]'); if (!hint) return; if (t.name === 'tatHours') { const h = Number(t.value); hint.textContent = h > 0 && h % 24 === 0 ? '= ' + fmtTat(h) : (h > 24 ? '= ' + (h / 24).toFixed(1) + ' days' : ''); } else { const ts = t.value ? new Date(t.value).getTime() : NaN; hint.textContent = ts && !isNaN(ts) ? (ts > now() ? '= ' + fmtDur(ts - now()) + ' from now' : 'in the past') : ''; } return; }
   if (t.dataset.triageTeam !== undefined) { const team = t.value; const who = $('[data-triage-who]'); if (who) { const eligible = membersWithRole(team); who.innerHTML = `<option value="">${eligible.length ? 'Choose…' : 'No one on this team yet'}</option>` + eligible.map((m) => `<option value="${attr(m.email)}">${esc(m.name)}</option>`).join(''); } return; }
   if (t.dataset.sf !== undefined && S.flowDraft) { const row = t.closest('.stage-editor'); const s = S.flowDraft.stages[Number(row.dataset.i)]; const k = t.dataset.sf; if (k === 'needsFile') s.needsFile = t.checked; else if (k === 'reviewer') { const set = new Set(s.reviewers || []); if (t.checked) set.add(t.value); else set.delete(t.value); s.reviewers = [...set]; } else if (k === 'slaHours') s.slaHours = Math.max(0, Number(t.value) || 0); else s[k] = t.value; if (k === 'kind' || k === 'slaFrom') { if (s.kind === 'review') { s.reviewers ||= ['role:coordinator']; if (!s.editsTo) s.editsTo = (S.flowDraft.stages.find((x) => x.kind === 'work') || {}).id || ''; } if (s.kind === 'work' && !s.role) s.role = 'team'; if (s.kind === 'triage' && (!s.role || s.role === 'team')) s.role = 'coordinator'; renderPage(false); return; } if (['color', 'name', 'slaHours', 'role', 'reviewer', 'editsTo'].includes(k)) { const fd = $('.flow-diagram'); if (fd) fd.outerHTML = flowDiagram(S.flowDraft); } return; }
-  if (t.dataset.ty !== undefined && S.settingsDraft) { const ty = S.settingsDraft.types[Number(t.dataset.i)]; if (!ty) return; const k = t.dataset.ty; if (k === 'tatDays') ty.tatHours = daysToHours(t.value); else ty[k] = t.value; if (k === 'name' && !ty._idLocked && String(ty.id || '').startsWith('type-')) { /* keep generated id */ } return; }
+  if (t.dataset.ty !== undefined && S.settingsDraft) { const ty = S.settingsDraft.types[Number(t.dataset.i)]; if (!ty) return; const k = t.dataset.ty; if (k === 'tatHoursIn') ty.tatHours = Math.max(0, Number(t.value) || 0); else ty[k] = t.value; if (k === 'name' && !ty._idLocked && String(ty.id || '').startsWith('type-')) { /* keep generated id */ } return; }
   if (t.dataset.ss !== undefined && S.settingsDraft) { const k = t.dataset.ss; if (k === 'start' || k === 'end') S.settingsDraft.workHours[k] = Number(t.value); else if (k === 'slaWarnAt') { S.settingsDraft.slaWarnAt = Number(t.value) / 100; const p = $('#warn-pct'); if (p) p.textContent = t.value + '%'; } else S.settingsDraft[k] = t.value; return; }
   if (t.dataset.day !== undefined && S.settingsDraft) { const d = Number(t.dataset.day); const days = S.settingsDraft.workHours.days; if (t.checked && !days.includes(d)) days.push(d); if (!t.checked) S.settingsDraft.workHours.days = days.filter((x) => x !== d); return; }
 });
