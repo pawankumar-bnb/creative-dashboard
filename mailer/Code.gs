@@ -3,7 +3,8 @@
  *
  * Runs every minute from a time-driven trigger, pulls pending notification
  * events from the Supabase outbox and sends one email per recipient from
- * the Google account that owns this script. No web app deployment needed.
+ * the Google account that owns this script. Also mirrors the weekly roster
+ * sheet into the dashboard on every edit. No web app deployment needed.
  *
  * Setup (once): paste this file into a new Apps Script project
  * (script.google.com), fill in TOKEN (the same secret stored in Supabase
@@ -14,17 +15,42 @@ const TOKEN = 'PASTE-THE-SAME-SECRET-AS-mailer_token';
 const SUPABASE_URL = 'https://rrnluvyammmlfjhtczod.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_klvoSJdP5MQR_cJXNrwk_g_nG6eP8yN';   // publishable key — not a secret
 const SENDER_NAME = 'Creative Request Ops';
+// Weekly roster: the "Social media - Planner" sheet mirrored into the dashboard
+const ROSTER_SHEET_ID = '1_GqH9S_thOlTrkVTqMwkQijY7DhIu3v-bfhW_iG-BOE';
+const ROSTER_GID = 0;   // the tab to mirror (gid from the sheet URL)
 
-/** Run this once from the editor: installs the trigger and sends anything already queued. */
+/** Run this once from the editor: installs the triggers, syncs the roster and sends anything queued. */
 function setup() {
-  ScriptApp.getProjectTriggers().forEach((t) => { if (t.getHandlerFunction() === 'pump') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach((t) => { if (['pump', 'syncRoster'].includes(t.getHandlerFunction())) ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('pump').timeBased().everyMinutes(1).create();
+  ScriptApp.newTrigger('syncRoster').forSpreadsheet(ROSTER_SHEET_ID).onChange().create();   // fires on anyone's edit
+  const rows = syncRoster();
   const n = pump();
-  Logger.log('Trigger installed. Sent ' + n + ' queued email(s).');
+  Logger.log('Triggers installed. Roster synced (' + rows + ' rows). Sent ' + n + ' queued email(s).');
+}
+
+/** Mirrors the roster sheet into the dashboard. Runs on every sheet change and every minute as a fallback. */
+function syncRoster() {
+  const ss = SpreadsheetApp.openById(ROSTER_SHEET_ID);
+  const sheet = ss.getSheets().find((s) => s.getSheetId() === ROSTER_GID) || ss.getSheets()[0];
+  const values = sheet.getDataRange().getDisplayValues();
+  const nonEmpty = (row) => row.some((c) => String(c).trim() !== '');
+  const headerAt = values.findIndex(nonEmpty);          // the sheet starts with a blank row
+  if (headerAt < 0) return 0;
+  const headers = values[headerAt].map((c) => String(c).trim());
+  const rows = values.slice(headerAt + 1).filter(nonEmpty).map((row) => headers.map((_, i) => String(row[i] == null ? '' : row[i]).trim()));
+  const data = { title: ss.getName(), sheetName: sheet.getName(), sheetUrl: ss.getUrl(), headers: headers, rows: rows, syncedAt: Date.now() };
+  const digest = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify([headers, rows])));
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('rosterDigest') === digest && props.getProperty('rosterForce') !== '1') return rows.length;   // nothing changed
+  rpc_('roster_sync', { p_token: TOKEN, p_data: data });
+  props.setProperty('rosterDigest', digest); props.deleteProperty('rosterForce');
+  return rows.length;
 }
 
 /** Called by the trigger every minute. */
 function pump() {
+  try { syncRoster(); } catch (err) { console.warn('roster sync: ' + err); }
   const events = rpc_('mail_outbox_claim', { p_token: TOKEN, p_limit: 25 }) || [];
   if (!events.length) return 0;
   let sent = 0;

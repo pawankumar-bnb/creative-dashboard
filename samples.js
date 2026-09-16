@@ -128,5 +128,23 @@
     { email: 'preety@bricknbolt.com', name: 'Preety', roles: ['requester'], active: true, emailUnconfirmed: true },
     { email: 'jayesh@bricknbolt.com', name: 'Jayesh', roles: ['requester'], active: true, emailUnconfirmed: true },
   ];
-  root.RelaySamples = { build, roster };
+  // Demo copy of the "Social media - Planner" sheet (same columns as the real one)
+  function weeklyRoster(now) {
+    const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const d = (i) => { const x = new Date(monday); x.setDate(x.getDate() + i); return `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`; };
+    return {
+      sample: true, title: 'Social media - Planner', sheetName: 'Sheet1', syncedAt: now - 7 * 60e3,
+      headers: ['Day', 'Date', '1st Half Post', 'Status', '2nd Half Post', 'Status'],
+      rows: [
+        ['Monday', d(0), 'Diwali offer teaser — carousel', 'Posted', 'Customer story: Ramesh family, Whitefield', 'Posted'],
+        ['Tuesday', d(1), 'Site progress reel — Sarjapur villa', 'Scheduled', 'Construction tip: RCC curing', 'In progress'],
+        ['Wednesday', d(2), 'Hyderabad launch — price-led static', 'In progress', 'Team spotlight: site engineers', 'Pending'],
+        ['Thursday', d(3), 'Poll: which elevation style?', 'Pending', 'Behind the scenes — quality checks', 'Pending'],
+        ['Friday', d(4), 'Referral programme reminder', 'Pending', '', ''],
+        ['Saturday', d(5), 'Weekend home-tour video', 'Pending', '', ''],
+        ['Sunday', d(6), '', '', '', ''],
+      ],
+    };
+  }
+  root.RelaySamples = { build, roster, weeklyRoster };
 })(typeof window !== 'undefined' ? window : module.exports);

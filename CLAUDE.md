@@ -24,6 +24,10 @@
 - `supabase/notifications.sql` → trigger `docs_notify` on `public.docs` queues events in `public.mail_outbox`; the Apps Script mailer (`mailer/Code.gs`, 1-minute time trigger, no web app) claims/acks them via RPCs guarded by the Vault secret `mailer_token`. `public.mailer_config.app_url` builds task links. Master switch = `config/settings.notifications.enabled` (Settings page). Workspace admin blocks 'Anyone' web apps, hence polling.
 - Events: raised, assigned, reassigned, submitted, rework, qc_passed, approved, reopened, cancelled. Actor excluded from recipients.
 
+## Weekly roster
+
+- `docs` collection `roster`, doc `weekly` = `{title, sheetName, sheetUrl, headers[], rows[][], syncedAt}` pushed by `syncRoster()` in `mailer/Code.gs` (onChange trigger on sheet `1_GqH9S_thOlTrkVTqMwkQijY7DhIu3v-bfhW_iG-BOE` gid 0 + every-minute fallback, MD5 digest to skip unchanged) via RPC `roster_sync(p_token, p_data)`. `viewRoster()` renders generically: `Status` columns fold into the previous column as chips.
+
 ## Data model reminders
 
 - Artifact viewer → `DbStore` (shared realtime `db`). Static hosting → `LocalStore` (per-browser demo mode) until a real backend adapter exists.

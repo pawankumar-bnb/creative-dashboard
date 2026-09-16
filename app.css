@@ -671,3 +671,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .seg.sm { padding: 2px; }
 .seg.sm button { padding: 3px 10px; min-height: 26px; font-size: 12px; }
 input[type="datetime-local"].input.sm { min-height: 32px; }
+
+/* ---------- weekly roster ---------- */
+.tbl.roster th:first-child, .tbl.roster td:first-child { padding-left: 18px; }
+.tbl.roster .ro-day { white-space: nowrap; }
+.tbl.roster .ro-date { color: var(--ink-3); white-space: nowrap; }
+.tbl.roster .ro-post { min-width: 220px; }
+.tbl.roster .ro-post .ro-title { font-weight: 500; margin-bottom: 4px; }
+.tbl.roster tr.ro-today td { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.tbl.roster tr.ro-today td:first-child { box-shadow: inset 3px 0 0 var(--accent); }

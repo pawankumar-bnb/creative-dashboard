@@ -68,6 +68,21 @@ begin
   end loop;
   return n;
 end $$;
+-- The mailer script also mirrors the weekly roster sheet into docs (collection 'roster', id 'weekly').
+create or replace function public.roster_sync(p_token text, p_data jsonb)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare tok text;
+begin
+  select decrypted_secret into tok from vault.decrypted_secrets where name = 'mailer_token' limit 1;
+  if tok is null or p_token is null or p_token <> tok then raise exception 'unauthorized' using errcode = '28000'; end if;
+  if jsonb_typeof(p_data) <> 'object' or jsonb_typeof(p_data -> 'rows') <> 'array' then raise exception 'roster payload must be an object with rows' using errcode = '22023'; end if;
+  insert into public.docs (collection, id, data) values ('roster', 'weekly', p_data)
+  on conflict (collection, id) do update set data = excluded.data;
+end $$;
+revoke all on function public.roster_sync(text, jsonb) from public;
+grant execute on function public.roster_sync(text, jsonb) to anon, authenticated;
+
 revoke all on function public.mail_outbox_claim(text, integer) from public;
 revoke all on function public.mail_outbox_ack(text, jsonb) from public;
 grant execute on function public.mail_outbox_claim(text, integer) to anon, authenticated;

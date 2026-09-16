@@ -28,7 +28,7 @@ Every stage is timed against its limit (coordinator SLA 24h, QC 24h, final appro
 | `samples.js` | Sample requests (marked `sample`) and the team roster for demo mode and first-run seeding |
 | `config.js` | Publishable keys for Clerk and Supabase (website only) |
 | `supabase/schema.sql`, `supabase/seed.sql` | Database schema + RLS, and the first-run seed |
-| `supabase/notifications.sql`, `mailer/Code.gs` | Stage-change email notifications: database trigger + Apps Script mailer |
+| `supabase/notifications.sql`, `mailer/Code.gs` | Stage-change email notifications + weekly-roster sheet sync (database trigger/RPCs + Apps Script) |
 | `scripts/build-artifact.mjs` | Builds `dist/artifact.html` for the claude.ai Artifact viewer |
 | `.github/workflows/deploy.yml` | GitHub Pages deployment on push to `main` |
 
@@ -56,6 +56,10 @@ Roles still live in the app's roster (Team page): a first-time sign-in on an all
 `supabase/notifications.sql` installs a trigger that watches every request write and queues one event per stage change in `public.mail_outbox`: **raised** → coordinator, **assigned / reassigned** → assignee (+ requester), **submitted for QC** → coordinator (+ requester), **rework** → assignee (+ requester), **QC passed** → requester + admins, **approved** → everyone on the task. The person who performed the action is never emailed.
 
 The mailer is `mailer/Code.gs`, a Google Apps Script that runs on a 1-minute timer, claims queued events through two token-guarded RPCs (`mail_outbox_claim` / `mail_outbox_ack`) and sends from the admin's Brick&Bolt account. Setup: paste the script, set `TOKEN` to the same secret stored in Supabase Vault as `mailer_token`, run `setup()` once. No web-app deployment is needed (Workspace admins often block those). Master switch: Settings → Email notifications.
+
+## Weekly roster
+
+The **Weekly roster** tab mirrors the team's "Social media - Planner" Google Sheet. The mailer script (`mailer/Code.gs`) has an installable *onChange* trigger on the sheet plus the every-minute fallback: on any edit it reads the sheet (display values, blank leading rows/columns dropped) and pushes it through the token-guarded `roster_sync` RPC into `docs` (`roster/weekly`); the dashboard subscribes to it like everything else, so edits appear within seconds. Status columns render as chips; today's row is highlighted. The sheet stays the place to edit — the tab links to it.
 
 ## Run locally
 

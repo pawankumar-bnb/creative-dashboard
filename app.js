@@ -11,6 +11,7 @@
 /* ---------------- constants ---------------- */
 const APP = { name: 'Creative Request Ops', ownerEmail: 'pawankumar@bricknbolt.com', ownerName: 'Pawan Kumar' };
 const CFG = window.RELAY_CONFIG || {};
+const ROSTER_SHEET_URL = CFG.rosterSheetUrl || 'https://docs.google.com/spreadsheets/d/1_GqH9S_thOlTrkVTqMwkQijY7DhIu3v-bfhW_iG-BOE/edit?gid=0#gid=0';
 const inArtifact = () => !!(window.claude && typeof window.claude.use === 'function');
 const LS = { me: 'relay.me', boardMode: 'relay.boardMode', local: 'relay.local.v2' };
 const H = 3600e3, D = 24 * H, MIN = 60e3;
@@ -218,6 +219,7 @@ class LocalStore {
     if (S) {
       S.roster.forEach((m) => { data.members[lower(m.email)] = { ...m, addedAt: now() }; });
       S.build(now()).requests.forEach((r) => { data.requests[r.id] = r; });
+      if (S.weeklyRoster) data.roster = { weekly: S.weeklyRoster(now()) };
     }
     return data;
   }
@@ -313,6 +315,7 @@ const S = {
   boardMode: localStorage.getItem(LS.boardMode) || 'board', throughputRange: localStorage.getItem('relay.throughput') || '7d',
   drawer: null, modal: null, gateError: '', gatePending: null, bootstrap: false, dbError: null,
   authMode: 'roster', clerk: null, identity: null, backend: 'local', clerkState: 'loading',
+  roster: null,
 };
 const roles = () => (S.settings.roles && S.settings.roles.length ? S.settings.roles : DEFAULT_ROLES);
 const roleById = (id) => roles().find((r) => r.id === id);
@@ -832,6 +835,51 @@ function viewTeam() {
     </div>
   </div>`;
 }
+/* ---------------- weekly roster (mirrors the team's Google Sheet) ---------------- */
+function statusClass(text) {
+  const t = lower(text); if (!t) return '';
+  if (/posted|done|live|published|complete/.test(t)) return 'good';
+  if (/scheduled|ready|approved|final/.test(t)) return 'accent';
+  if (/pending|draft|wip|progress|design|writing|review/.test(t)) return 'warn';
+  if (/missed|delay|cancel|hold|blocked/.test(t)) return 'crit';
+  return '';
+}
+function parseSheetDate(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/); if (m) { const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]); return new Date(y, Number(m[2]) - 1, Number(m[1])).getTime(); }
+  const t = Date.parse(s); return isNaN(t) ? null : t;
+}
+function viewRoster() {
+  const r = S.roster; const admin = isAdmin();
+  const head = `<div class="page-head" data-anim><div><h1>Weekly roster</h1><p class="lede">The social-media planner, mirrored from the team's Google Sheet. Anyone can edit the sheet — changes show up here on their own.</p></div><div class="page-actions"><a class="btn primary" href="${attr(ROSTER_SHEET_URL)}" target="_blank" rel="noopener">${ic('external')}Open the sheet</a></div></div>`;
+  if (!r || !Array.isArray(r.rows)) {
+    return head + `<div class="panel" data-anim><div class="panel-body">${emptyHtml('calendar', 'The sheet is not connected yet')}${admin && S.backend === 'supabase' ? `<div class="callout" style="margin-top:8px">Run <b>setup</b> in the mailer Apps Script once more (it now installs the sheet sync). After that every edit to the sheet lands here within seconds.</div>` : ''}</div></div>`;
+  }
+  const headers = r.headers || []; const rows = r.rows || [];
+  // drop columns that are empty in the header AND every row (the sheet has a blank first column)
+  const keep = headers.map((h, i) => !!String(h || '').trim() || rows.some((row) => String(row[i] || '').trim()));
+  const H_ = headers.filter((_, i) => keep[i]); const R_ = rows.map((row) => row.filter((_, i) => keep[i]));
+  // a "Status" column belongs to the column before it → render as a chip inside that cell
+  const statusIdx = new Set(); H_.forEach((h, i) => { if (/^status/i.test(String(h).trim()) && i > 0) statusIdx.add(i); });
+  const dayIdx = H_.findIndex((h) => /^day/i.test(String(h).trim())); const dateIdx = H_.findIndex((h) => /^date/i.test(String(h).trim()));
+  const today = new Date(); today.setHours(0, 0, 0, 0); const todayName = DAYS[today.getDay()]; const longDay = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()];
+  let todayRow = -1;
+  if (dateIdx >= 0) todayRow = R_.findIndex((row) => { const t = parseSheetDate(row[dateIdx]); return t != null && t === today.getTime(); });
+  if (todayRow < 0 && dayIdx >= 0) todayRow = R_.findIndex((row) => lower(row[dayIdx]) === lower(longDay));
+  const cell = (row, i) => {
+    if (statusIdx.has(i)) return null;
+    const v = String(row[i] || '').trim(); const st = statusIdx.has(i + 1) ? String(row[i + 1] || '').trim() : null;
+    if (i === dayIdx) return `<td class="ro-day"><b>${esc(v)}</b>${lower(v) === lower(longDay) ? '<span class="chip accent" style="margin-left:8px">Today</span>' : ''}</td>`;
+    if (i === dateIdx) { const t = parseSheetDate(v); return `<td class="ro-date mono">${t ? esc(fmtDate(t)) : esc(v || '—')}</td>`; }
+    if (st !== null) return `<td class="ro-post">${v ? `<div class="ro-title">${esc(v)}</div>` : '<div class="muted">—</div>'}${st ? `<span class="chip ${statusClass(st)}">${esc(st)}</span>` : (v ? '<span class="chip">No status</span>' : '')}</td>`;
+    return `<td>${v ? esc(v) : '<span class="muted">—</span>'}</td>`;
+  };
+  const ths = H_.map((h, i) => statusIdx.has(i) ? '' : `<th>${esc(h)}</th>`).join('');
+  const trs = R_.map((row, ri) => `<tr class="${ri === todayRow ? 'ro-today' : ''}">${H_.map((_, i) => cell(row, i) || '').join('')}</tr>`).join('');
+  const posts = R_.reduce((n, row) => n + H_.reduce((k, h, i) => k + (statusIdx.has(i + 1) && String(row[i] || '').trim() ? 1 : 0), 0), 0);
+  const done = R_.reduce((n, row) => n + H_.reduce((k, h, i) => k + (statusIdx.has(i) && statusClass(row[i]) === 'good' ? 1 : 0), 0), 0);
+  return head + `<div class="panel" data-anim><div class="panel-head"><div><h2>${esc(r.title || 'Social media planner')}${r.sheetName ? ` <span class="muted" style="font-weight:400">· ${esc(r.sheetName)}</span>` : ''}</h2><div class="sub">${posts ? `${posts} posts planned · ${done} posted` : 'No posts planned yet'}${r.syncedAt ? ` · synced ${fmtRel(r.syncedAt)}` : ''}${r.sample ? ' · sample' : ''}</div></div>${r.sample ? '<span class="chip">Sample data</span>' : `<span class="mode-pill live"><span class="dot"></span>Live from Google Sheets</span>`}</div>
+    <div class="table-wrap"><table class="tbl roster"><thead><tr>${ths}</tr></thead><tbody>${trs || `<tr><td colspan="${H_.length}">${emptyHtml('calendar', 'The sheet is empty')}</td></tr>`}</tbody></table></div></div>`;
+}
 function stageOwnerText(s, r) {
   if (s.kind === 'start') return `Raised by <b>anyone</b>`;
   if (s.kind === 'triage') return `Owned by <b>${esc(roleName(s.role))}</b>`;
@@ -1068,7 +1116,7 @@ async function registerAndSignIn(email, name) {
 /* ---------------- shell ---------------- */
 const NAV = [
   { v: 'dashboard', label: 'Dashboard', icon: 'dashboard' }, { v: 'board', label: 'Requests', icon: 'board' }, { v: 'queue', label: 'My queue', icon: 'inbox' },
-  { v: 'team', label: 'Team', icon: 'users' }, { v: 'flow', label: 'Flow', icon: 'flow' }, { v: 'settings', label: 'Settings', icon: 'settings', admin: true },
+  { v: 'roster', label: 'Weekly roster', icon: 'calendar' }, { v: 'team', label: 'Team', icon: 'users' }, { v: 'flow', label: 'Flow', icon: 'flow' }, { v: 'settings', label: 'Settings', icon: 'settings', admin: true },
 ];
 function navItems() {
   const m = metrics();
@@ -1085,7 +1133,7 @@ function shellHtml() {
       <div class="content"><div class="page" id="page"></div></div></div>
     <nav class="bottom-nav" aria-label="Main">${navItems()}</nav></div>`;
 }
-const VIEWS = { dashboard: viewDashboard, board: viewBoard, queue: viewQueue, team: viewTeam, flow: viewFlow, settings: viewSettings };
+const VIEWS = { dashboard: viewDashboard, board: viewBoard, queue: viewQueue, roster: viewRoster, team: viewTeam, flow: viewFlow, settings: viewSettings };
 
 /* ---------------- render ---------------- */
 let shellMounted = false;
@@ -1318,6 +1366,7 @@ function subscribeAll() {
   const onErr = (e) => { if (e && (e.code === 'revoked' || e.code === 'not_granted')) { S.dbError = e.code; toast('Your access to this workspace changed — reload to continue.', 'crit'); } };
   S.store.subscribe('members', (rows) => { S.members = rows; S.loaded.members = true; if (S.authMode === 'clerk') { resolveIdentity().then(() => renderAll(false)); return; } if (S.me) { const fresh = rows.find((m) => sameEmail(m.email, S.me.email)); if (!fresh || fresh.active === false) { if (!sameEmail(S.me.email, APP.ownerEmail)) { S.me = null; localStorage.removeItem(LS.me); toast('Your access was changed by an admin.', 'info'); } } else S.me = fresh; } else if (S.loaded.members) { const saved = localStorage.getItem(LS.me); if (saved) { const m = rows.find((x) => sameEmail(x.email, saved) && x.active !== false); if (m) S.me = m; } } S.bootstrap = S.loaded.members && rows.length === 0; renderAll(false); }, onErr);
   S.store.subscribe('requests', (rows) => { S.requests = rows.map((r) => ({ visits: [], thread: [], deliverables: [], assignees: {}, refs: [], ...r })).sort((a, b) => (a.num || 0) - (b.num || 0)); S.loaded.requests = true; renderAll(false); }, onErr);
+  S.store.subscribe('roster', (rows) => { S.roster = rows.find((r) => r.id === 'weekly') || null; if (S.route.view === 'roster') renderPage(false); }, () => {});
   S.store.subscribe('config', (rows) => { const flow = rows.find((r) => r.id === 'flow'); const settings = rows.find((r) => r.id === 'settings'); if (flow && Array.isArray(flow.stages) && flow.stages.length && flow.stages.some((s) => s.kind === 'triage')) S.flow = flow; S.settings = normalizeSettings(settings); S.loaded.config = true; renderAll(false); }, onErr);
 }
 /* ---------------- Clerk (real identity on the website) ---------------- */
