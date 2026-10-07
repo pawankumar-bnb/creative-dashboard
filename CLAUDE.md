@@ -28,6 +28,10 @@
 
 - `docs` collection `roster`, doc `weekly` = `{title, sheetName, sheetUrl, headers[], rows[][], syncedAt}` pushed by `syncRoster()` in `mailer/Code.gs` (onChange trigger on sheet `1_GqH9S_thOlTrkVTqMwkQijY7DhIu3v-bfhW_iG-BOE` gid 0 + every-minute fallback, MD5 digest to skip unchanged) via RPC `roster_sync(p_token, p_data)`. `viewRoster()` renders generically: `Status` columns fold into the previous column as chips.
 
+## Board filters
+
+- `S.filters` carries `person` (email or `__none` = unassigned production work), `dateField` (created|due|done), `from`/`to` (ISO dates) and `preset`. `responsibleFor(r)` returns the emails a task is waiting on (same rule as `needsMe`), used by the person filter and the summary bar.
+
 ## Data model reminders
 
 - Artifact viewer → `DbStore` (shared realtime `db`). Static hosting → `LocalStore` (per-browser demo mode) until a real backend adapter exists.

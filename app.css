@@ -680,3 +680,32 @@ input[type="datetime-local"].input.sm { min-height: 32px; }
 .tbl.roster .ro-post .ro-title { font-weight: 500; margin-bottom: 4px; }
 .tbl.roster tr.ro-today td { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
 .tbl.roster tr.ro-today td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* ---------- filter popover ---------- */
+.pop-wrap { position: relative; }
+.pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 280px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
+.pop-head { padding: 12px 14px 0; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; }
+.pop-body { padding: 10px 14px 14px; }
+.pop-presets { display: flex; flex-direction: column; gap: 2px; }
+.pop-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink-2); padding: 7px 8px; border-radius: 8px; font-size: 13.5px; min-height: 34px; }
+.pop-row:hover { background: var(--surface-2); color: var(--ink); }
+.pop-row.active { color: var(--accent); font-weight: 600; }
+.pop .field > label { font-size: 11.5px; }
+.pop .row .field { flex: 1; min-width: 0; }
+
+/* ---------- person summary bar ---------- */
+.person-bar { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding: 14px 18px; margin-bottom: 16px; }
+.person-bar .pb-main { display: flex; align-items: center; gap: 12px; min-width: 200px; }
+.person-bar .pb-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.person-bar .pb-sub { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: var(--ink-3); }
+.person-bar .pb-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+.person-bar .pb-stat { min-width: 86px; padding: 6px 12px; border-left: 1px solid var(--border); }
+.person-bar .pb-v { font-size: 20px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.person-bar .pb-l { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+.person-bar .pb-stat.crit .pb-v { color: var(--crit); }
+.person-bar .pb-stat.warn .pb-v { color: var(--warn); }
+@media (max-width: 767px) {
+  .pop { width: min(300px, calc(100vw - 32px)); }
+  .person-bar .pb-stats { margin-left: 0; }
+  .person-bar .pb-stat { min-width: 72px; padding: 6px 10px; }
+}

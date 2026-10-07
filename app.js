@@ -311,7 +311,7 @@ const S = {
   me: null, members: [], requests: [], flow: clone(DEFAULT_FLOW), settings: clone(DEFAULT_SETTINGS),
   loaded: { members: false, requests: false, config: false },
   route: { view: 'dashboard', id: null },
-  q: '', filters: { type: '', prio: '', team: '', mine: false, breached: false, stage: '' }, sort: { key: 'updatedAt', dir: 'desc' },
+  q: '', filters: { type: '', prio: '', team: '', mine: false, breached: false, stage: '', person: '', dateField: 'created', from: '', to: '', preset: '' }, sort: { key: 'updatedAt', dir: 'desc' },
   boardMode: localStorage.getItem(LS.boardMode) || 'board', throughputRange: localStorage.getItem('relay.throughput') || '7d',
   drawer: null, modal: null, gateError: '', gatePending: null, bootstrap: false, dbError: null,
   authMode: 'roster', clerk: null, identity: null, backend: 'local', clerkState: 'loading',
@@ -371,6 +371,41 @@ const isOverdue = (r) => r.status === 'open' && r.dueDate && parseDate(r.dueDate
 function productionTat(r) { const w = workStage(); return w ? stageTat(r, w.id) : 0; }
 function reviewerMatch(spec, r, m = S.me) { if (!m) return false; if (spec === 'requester') return isRequester(r, m); if (String(spec).startsWith('role:')) return hasRole(m, spec.slice(5)); return false; }
 function reviewerLabel(spec, r) { if (spec === 'requester') return r && r.requester ? r.requester.name : 'the requester'; if (String(spec).startsWith('role:')) { const role = spec.slice(5); const ms = membersWithRole(role); return ms.length && ms.length <= 3 ? ms.map((m) => m.name).join(' / ') : roleName(role); } return spec; }
+/* Everyone the task is waiting on right now — the same rule needsMe() uses, by email. */
+function responsibleFor(r) {
+  if (!r || r.status !== 'open') return [];
+  const st = stageById(r.stage); if (!st) return [];
+  const out = [];
+  if (st.kind === 'triage') membersWithRole(st.role).forEach((m) => out.push(lower(m.email)));
+  else if (st.kind === 'work') { const a = (r.assignees || {})[st.id]; if (a && a.email) out.push(lower(a.email)); }
+  else if (st.kind === 'review') (st.reviewers || []).forEach((spec) => {
+    if (spec === 'requester') { if (r.requester && r.requester.email) out.push(lower(r.requester.email)); }
+    else if (String(spec).startsWith('role:')) membersWithRole(spec.slice(5)).forEach((m) => out.push(lower(m.email)));
+  });
+  return out;
+}
+const DATE_FIELDS = [['created', 'Raised'], ['due', 'Due'], ['done', 'Approved']];
+const DATE_PRESETS = [['today', 'Today'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['week', 'This week'], ['month', 'This month']];
+function presetRange(id) {
+  const d = new Date(); d.setHours(0, 0, 0, 0); const iso = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  const back = (n) => { const x = new Date(d); x.setDate(x.getDate() - n); return x; };
+  if (id === 'today') return { from: iso(d), to: iso(d) };
+  if (id === '7d') return { from: iso(back(6)), to: iso(d) };
+  if (id === '30d') return { from: iso(back(29)), to: iso(d) };
+  if (id === 'week') { const m = new Date(d); m.setDate(m.getDate() - ((m.getDay() + 6) % 7)); return { from: iso(m), to: iso(d) }; }
+  if (id === 'month') { const m = new Date(d.getFullYear(), d.getMonth(), 1); return { from: iso(m), to: iso(d) }; }
+  return { from: '', to: '' };
+}
+function requestDate(r, field) { return field === 'due' ? parseDate(r.dueDate) : field === 'done' ? (r.completedAt || null) : r.createdAt; }
+function dateRangeLabel(f) {
+  const field = (DATE_FIELDS.find((x) => x[0] === f.dateField) || DATE_FIELDS[0])[1];
+  if (!f.from && !f.to) return 'All dates';
+  const preset = DATE_PRESETS.find((p) => p[0] === f.preset);
+  if (preset) return `${field}: ${preset[1]}`;
+  const a = f.from ? fmtDate(parseDate(f.from)) : 'any';
+  const b = f.to ? fmtDate(parseDate(f.to)) : 'any';
+  return `${field}: ${a} → ${b}`;
+}
 function needsMe(r) {
   if (!S.me || r.status !== 'open') return null;
   const st = stageById(r.stage); if (!st) return null;
@@ -756,6 +791,20 @@ function filteredRequests() {
     if (f.stage && r.stage !== f.stage) return false;
     if (f.mine && !(needsMe(r) || isRequester(r) || Object.values(r.assignees || {}).some(isMe))) return false;
     if (f.breached && !isBreachedNow(r)) return false;
+    if (f.person) {
+      if (f.person === '__none') { const st = stageById(r.stage); if (!(r.status === 'open' && st && st.kind === 'work' && !(r.assignees || {})[st.id])) return false; }
+      else {
+        const e = lower(f.person); const is = (p) => !!p && lower(p.email) === e;
+        const involved = responsibleFor(r).includes(e) || Object.values(r.assignees || {}).some(is) || is(r.requester);
+        if (!involved) return false;
+      }
+    }
+    if (f.from || f.to) {
+      const d = requestDate(r, f.dateField);
+      if (d == null) return false;
+      if (f.from && d < parseDate(f.from) - 86399000) return false;   // parseDate gives end-of-day
+      if (f.to && d > parseDate(f.to)) return false;
+    }
     return true;
   });
 }
@@ -767,16 +816,65 @@ function filtersHtml() {
     <select class="input sm" data-filter="type" aria-label="Filter by type" style="width:auto"><option value="">All types</option>${types().map((t) => `<option value="${attr(t.id)}" ${f.type === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
     <select class="input sm" data-filter="prio" aria-label="Filter by priority" style="width:auto"><option value="">All priorities</option>${S.settings.priorities.map((t) => `<option ${f.prio === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
     ${S.boardMode === 'list' ? `<select class="input sm" data-filter="stage" aria-label="Filter by stage" style="width:auto"><option value="">All stages</option>${stages().filter((s) => s.kind !== 'start').map((s) => `<option value="${attr(s.id)}" ${f.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
+    ${peopleSelectHtml(f.person)}
+    <div class="pop-wrap"><button class="btn sm ${f.from || f.to ? 'primary' : ''}" data-action="date-pop" aria-haspopup="true">${ic('calendar', 'sm')}${esc(dateRangeLabel(f))}</button>${dateRangePopHtml(f)}</div>
     <button class="btn sm ${f.mine ? 'primary' : ''}" data-toggle="mine">${ic('user', 'sm')}Mine</button>
     <button class="btn sm ${f.breached ? 'primary' : ''}" data-toggle="breached">${ic('alert', 'sm')}Over limit</button>
+    ${f.person || f.from || f.to || f.type || f.team || f.prio || f.stage || f.mine || f.breached ? `<button class="btn sm ghost" data-action="clear-filters">${ic('x', 'sm')}Clear</button>` : ''}
     <span class="spacer"></span>
     <span class="small muted">${plural(filteredRequests().length, 'request')}</span>
   </div>`;
 }
+/* People dropdown, grouped by what they do. */
+function peopleSelectHtml(sel) {
+  const seen = new Set(); const groups = [];
+  [['coordinator', 'Coordinator'], ['design', 'Graphic design'], ['video', 'Video editing'], ['admin', 'Admin'], ['requester', 'Requesters']].forEach(([role, label]) => {
+    const ms = membersWithRole(role).filter((m) => !seen.has(m.id)); ms.forEach((m) => seen.add(m.id));
+    if (ms.length) groups.push(`<optgroup label="${attr(label)}">${ms.sort((a, b) => a.name.localeCompare(b.name)).map((m) => `<option value="${attr(m.email)}" ${sameEmail(sel, m.email) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</optgroup>`);
+  });
+  return `<select class="input sm" data-filter="person" aria-label="Filter by person" style="width:auto;max-width:220px"><option value="">Anyone</option><option value="__none" ${sel === '__none' ? 'selected' : ''}>Unassigned work</option>${groups.join('')}</select>`;
+}
+function dateRangePopHtml(f) {
+  return `<div class="pop date-pop" hidden>
+    <div class="pop-head">Filter by date</div>
+    <div class="pop-body">
+      <form data-form="date-range" class="stack" style="gap:10px">
+        <div class="field"><label>Which date</label><select class="input sm" name="dateField">${DATE_FIELDS.map(([k, l]) => `<option value="${attr(k)}" ${f.dateField === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+        <div class="pop-presets">${DATE_PRESETS.map(([k, l]) => `<button type="button" class="pop-row ${f.preset === k ? 'active' : ''}" data-action="date-preset" data-preset="${attr(k)}">${esc(l)}${f.preset === k ? ic('check', 'sm') : ''}</button>`).join('')}</div>
+        <div class="divider" style="margin:2px 0"></div>
+        <div class="row" style="gap:8px"><div class="field"><label>From</label><input class="input sm" type="date" name="from" value="${attr(f.from)}"></div><div class="field"><label>To</label><input class="input sm" type="date" name="to" value="${attr(f.to)}"></div></div>
+        <div class="row between"><button type="button" class="btn sm ghost" data-action="date-clear">Clear</button><button class="btn sm primary" type="submit">Apply</button></div>
+      </form>
+    </div></div>`;
+}
+/* What one person has in hand, shown above the board when they are picked. */
+function personSummaryHtml(email) {
+  if (email === '__none') { const n = filteredRequests().length; return `<div class="panel person-bar" data-anim><div class="pb-main">${personHtml(null, 'lg')}<div><div class="pb-name">Unassigned work</div><div class="pb-sub">${plural(n, 'task')} in production with nobody assigned</div></div></div></div>`; }
+  const m = S.members.find((x) => sameEmail(x.email, email)); if (!m) return '';
+  const e = lower(email); const open = S.requests.filter((r) => r.status === 'open');
+  const waiting = open.filter((r) => responsibleFor(r).includes(e));
+  const over = waiting.filter(isBreachedNow);
+  const raised = open.filter((r) => r.requester && sameEmail(r.requester.email, e) && !responsibleFor(r).includes(e));
+  const done30 = S.requests.filter((r) => r.status === 'done' && r.result && r.result.assignee && sameEmail(r.result.assignee.email, e) && (r.result.approvedAt || r.completedAt || 0) >= now() - 30 * D);
+  const avg = done30.length ? done30.reduce((a, r) => a + (r.result.actualHours || 0), 0) / done30.length : null;
+  const onTime = done30.length ? done30.filter((r) => r.result.met).length / done30.length : null;
+  const stat = (label, value, cls = '') => `<div class="pb-stat ${cls}"><div class="pb-v">${value}</div><div class="pb-l">${esc(label)}</div></div>`;
+  return `<div class="panel person-bar" data-anim>
+    <div class="pb-main">${personHtml(m, 'lg')}<div><div class="pb-name">${esc(m.name)}${isMe(m) ? ' <span class="chip accent">you</span>' : ''}</div><div class="pb-sub">${(m.roles || []).map((r) => `<span class="role-chip" style="--c:${attr(roleColor(r))}"><i></i>${esc(roleName(r))}</span>`).join(' ')}</div></div></div>
+    <div class="pb-stats">
+      ${stat('waiting on them', waiting.length)}
+      ${stat('over SLA / TAT', over.length, over.length ? 'crit' : '')}
+      ${stat('raised by them', raised.length)}
+      ${stat('approved · 30d', done30.length)}
+      ${stat('avg TAT', avg == null ? '—' : fmtDur(avg * H))}
+      ${stat('on time', onTime == null ? '—' : Math.round(onTime * 100) + '%', onTime != null && onTime < 0.8 ? 'warn' : '')}
+    </div></div>`;
+}
 function viewBoard() {
   const rs = filteredRequests();
   const head = `<div class="page-head" data-anim><div><h1>Requests</h1><p class="lede">Every requirement moving through ${stages().filter((s) => s.kind !== 'start' && s.kind !== 'end').map((s) => s.name).join(' → ')}.</p></div><div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>`;
-  if (S.boardMode === 'list') return head + filtersHtml() + viewList(rs);
+  const summary = S.filters.person ? personSummaryHtml(S.filters.person) : '';
+  if (S.boardMode === 'list') return head + filtersHtml() + summary + viewList(rs);
   const cols = boardStages().map((st) => {
     let items = rs.filter((r) => r.stage === st.id && r.status === 'open').sort((a, b) => (slaState(b).ratio || 0) - (slaState(a).ratio || 0));
     if (st.kind === 'end') items = rs.filter((r) => r.stage === st.id && r.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)).slice(0, 12);
@@ -785,7 +883,7 @@ function viewBoard() {
     return `<section class="col" style="--stage:${attr(themed(st.color))}" data-anim><div class="col-head"><span class="swatch"></span><h3>${esc(st.name)}</h3>${lim ? `<span class="sla">${esc(lim)}</span>` : ''}<span class="count">${items.length}${breached ? ` <span style="color:var(--crit)">· ${breached}!</span>` : ''}</span></div><div class="col-body">${items.map(cardHtml).join('') || `<div class="col-empty">${st.kind === 'end' ? 'Nothing approved yet' : 'Nothing here'}</div>`}</div></section>`;
   }).join('');
   const cancelled = rs.filter((r) => r.status === 'cancelled').length;
-  return head + filtersHtml() + `<div class="board" id="board">${cols}</div>${cancelled ? `<p class="small muted" style="margin-top:8px">${plural(cancelled, 'cancelled request')} hidden from the board — switch to List to see them.</p>` : ''}`;
+  return head + filtersHtml() + summary + `<div class="board" id="board">${cols}</div>${cancelled ? `<p class="small muted" style="margin-top:8px">${plural(cancelled, 'cancelled request')} hidden from the board — switch to List to see them.</p>` : ''}`;
 }
 function viewList(rs) {
   const k = S.sort.key, dir = S.sort.dir === 'asc' ? 1 : -1;
@@ -1247,6 +1345,10 @@ function noteBox(opts) { return new Promise((res) => { S.modal = { type: 'note',
 
 document.addEventListener('click', async (e) => {
   const openEl = e.target.closest('[data-open]'); if (openEl && !e.target.closest('a')) { openRequest(openEl.dataset.open); return; }
+  const popBtn = e.target.closest('[data-action="date-pop"]');
+  const openPop = $('.date-pop:not([hidden])');
+  if (openPop && !e.target.closest('.date-pop')) { openPop.hidden = true; if (!popBtn) return; }
+  if (popBtn) { const pop = popBtn.parentElement.querySelector('.date-pop'); if (pop) { pop.hidden = !pop.hidden; if (!pop.hidden) { pop.style.left = '0px'; const over = pop.getBoundingClientRect().right - (window.innerWidth - 12); if (over > 0) pop.style.left = -over + 'px'; } } return; }
   const modeBtn = e.target.closest('[data-tat-mode]'); if (modeBtn) { const box = modeBtn.closest('.tat-control'); const mode = modeBtn.dataset.tatMode; box.querySelector('[name=tatMode]').value = mode; $$('[data-tat-mode]', box).forEach((b) => b.classList.toggle('active', b === modeBtn)); $$('[data-tat-pane]', box).forEach((p) => { p.hidden = p.dataset.tatPane !== mode; }); return; }
   const rangeEl = e.target.closest('[data-range]'); if (rangeEl) { S.throughputRange = rangeEl.dataset.range; localStorage.setItem('relay.throughput', S.throughputRange); renderPage(false); return; }
   const modeEl = e.target.closest('[data-mode]'); if (modeEl) { S.boardMode = modeEl.dataset.mode; localStorage.setItem(LS.boardMode, S.boardMode); renderPage(false); return; }
@@ -1286,6 +1388,9 @@ document.addEventListener('click', async (e) => {
     case 'del-type': S.settingsDraft.types.splice(Number(act.dataset.i), 1); renderPage(false); break;
     case 'del-prio': S.settingsDraft.priorities.splice(Number(act.dataset.i), 1); renderPage(false); break;
     case 'save-settings': { const st = clone(S.settingsDraft); st.prefix = (st.prefix || 'BB').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'BB'; st.types = st.types.map((t) => ({ ...t, name: String(t.name || '').trim(), tatHours: Number(t.tatHours) || 24 })).filter((t) => t.name); if (!st.types.length) return toast('Keep at least one request type.', 'crit'); const names = new Set(); for (const t of st.types) { if (names.has(lower(t.name))) return toast(`Two types are called "${t.name}".`, 'crit'); names.add(lower(t.name)); } if (!st.priorities.length) return toast('Keep at least one priority.', 'crit'); st.allowedDomains = String(st.allowedDomains || '').split(/[,\s]+/).map((d) => lower(d).replace(/^@/, '')).filter(Boolean); if (st.workHours.enabled && st.workHours.end <= st.workHours.start) return toast('The working day must end after it starts.', 'crit'); if (st.workHours.enabled && !st.workHours.days.length) return toast('Pick at least one working day.', 'crit'); await saveSettings(st); S.settingsDraft = clone(S.settings); renderPage(false); break; }
+    case 'date-preset': { const p = act.dataset.preset; const range = presetRange(p); S.filters = { ...S.filters, ...range, preset: p }; renderPage(false); break; }
+    case 'date-clear': S.filters = { ...S.filters, from: '', to: '', preset: '' }; renderPage(false); break;
+    case 'clear-filters': S.filters = { type: '', prio: '', team: '', mine: false, breached: false, stage: '', person: '', dateField: S.filters.dateField, from: '', to: '', preset: '' }; S.q = ''; renderPage(false); break;
     case 'export': await doExport(); break;
     case 'remove-samples': if (await confirmBox({ title: 'Remove all sample requests?', sub: 'Sample tasks are deleted for everyone. The team roster stays.', confirm: 'Remove samples', danger: true })) await removeSamples(); break;
     case 'reset-demo': if (S.store.reset && await confirmBox({ title: 'Reset the demo workspace?', sub: 'Everything in this browser goes back to the sample state.', confirm: 'Reset', danger: true })) { S.store.reset(); S.flow = clone(DEFAULT_FLOW); S.settings = clone(DEFAULT_SETTINGS); S.flowDraft = null; S.settingsDraft = null; renderAll(true); } break;
@@ -1315,6 +1420,7 @@ document.addEventListener('submit', async (e) => {
     case 'deliverable': { if (!isUrl(f.url)) return toast('Paste a full https:// link.', 'crit'); form.reset(); await actAddDeliverable(S.drawer, f.url.trim(), (f.label || '').trim()); break; }
     case 'comment': { const t = f.text.trim(); if (!t) return; form.reset(); await actComment(S.drawer, t); break; }
     case 'add-prio': { const v = f.v.trim(); if (v && !S.settingsDraft.priorities.includes(v)) S.settingsDraft.priorities.push(v); renderPage(false); break; }
+    case 'date-range': { if (f.from && f.to && parseDate(f.from) > parseDate(f.to)) return toast('The start date is after the end date.', 'crit'); S.filters = { ...S.filters, dateField: f.dateField, from: f.from || '', to: f.to || '', preset: '' }; renderPage(false); break; }
   }
 });
 async function removeMemberQuiet(id) { S.members = S.members.filter((m) => m.id !== id); try { await S.store.del('members', id); } catch (e) { /* best effort */ } }
