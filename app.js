@@ -22,6 +22,7 @@ const DEFAULT_ROLES = [
   { id: 'requester',   name: 'Requester',      color: '#64748B', desc: 'Anyone at Brick&Bolt — raises requests and gives the final approval on their own' },
   { id: 'design',      name: 'Graphic design', color: '#4a3aa7', desc: 'Designers — banners, creatives, collaterals, decks' },
   { id: 'video',       name: 'Video editing',  color: '#0E9384', desc: 'Video editors — GIFs, reels, event and testimonial shoots' },
+  { id: 'videolead',   name: 'Video lead',     color: '#0E7490', desc: 'Runs the video flow: takes every brief, assigns the editors, does QC and uploads the final file' },
 ];
 const TEAMS = [{ id: 'design', name: 'Graphic design team' }, { id: 'video', name: 'Video editing team' }];
 const DEFAULT_TYPES = [
@@ -36,17 +37,39 @@ const DEFAULT_TYPES = [
   { id: 'hr-events',    name: 'HR event shoots (in-house)',      team: 'video',  tatHours: 24,  from: 'Preety',             goesTo: 'Pratyush',           note: '1 day' },
   { id: 'testimonials', name: 'Testimonial & home-tour shoots',  team: 'video',  tatHours: 72,  from: 'OPS / Sakshi',       goesTo: 'Pratyush / Dhanraj', note: '2–3 days' },
 ];
+/* One flow per team. Stage ids are unique across both flows, so a stage can always
+   be resolved from its id alone; order and "what comes next" are per flow. */
 const DEFAULT_FLOW = {
-  version: 2,
-  stages: [
-    { id: 'intake',     name: 'Requested',      kind: 'start',  role: 'requester',   slaHours: 0,  color: '#64748B' },
-    { id: 'brief',      name: 'Brief & assign', kind: 'triage', role: 'coordinator', slaHours: 24, color: '#1baf7a' },
-    { id: 'production', name: 'In production',  kind: 'work',   role: 'team',        slaHours: 0,  slaFrom: 'task', needsFile: true, color: '#4a3aa7' },
-    { id: 'qc',         name: 'QC',             kind: 'review', reviewers: ['role:coordinator'],    slaHours: 24, editsTo: 'production', color: '#eb6834' },
-    { id: 'approval',   name: 'Final approval', kind: 'review', reviewers: ['requester', 'role:admin'], slaHours: 24, editsTo: 'production', color: '#2a78d6' },
-    { id: 'done',       name: 'Approved',       kind: 'end',    role: '',            slaHours: 0,  color: '#0ca30c' },
-  ],
+  version: 3,
+  teams: {
+    design: [
+      { id: 'intake',     name: 'Requested',      kind: 'start',  role: 'requester',   slaHours: 0,  phase: 'intake', color: '#64748B' },
+      { id: 'brief',      name: 'Brief & assign', kind: 'triage', role: 'coordinator', slaHours: 24, phase: 'brief',  color: '#1baf7a' },
+      { id: 'production', name: 'In production',  kind: 'work',   role: 'team',        slaHours: 0,  slaFrom: 'task', needsFile: true, phase: 'work', color: '#4a3aa7' },
+      { id: 'qc',         name: 'QC',             kind: 'review', reviewers: ['role:coordinator'],    slaHours: 24, editsTo: 'production', phase: 'qc', color: '#eb6834' },
+      { id: 'approval',   name: 'Final approval', kind: 'review', reviewers: ['requester', 'role:admin'], slaHours: 24, editsTo: 'production', phase: 'approval', color: '#2a78d6' },
+      { id: 'done',       name: 'Approved',       kind: 'end',    role: '',            slaHours: 0,  phase: 'done',   color: '#0ca30c' },
+    ],
+    video: [
+      { id: 'v-intake',   name: 'Requested',      kind: 'start',  role: 'requester',   slaHours: 0,  phase: 'intake', color: '#64748B' },
+      { id: 'v-brief',    name: 'Brief received', kind: 'triage', role: 'videolead',   slaHours: 12, phase: 'brief',  color: '#1baf7a' },
+      { id: 'v-assigned', name: 'Assigned',       kind: 'work',   role: 'video',       slaHours: 12, phase: 'work',   color: '#64748B', step: 'start', skipTo: 'v-firstcut', skipLabel: 'No shoot needed', nextLabel: 'Start shoot' },
+      { id: 'v-shoot',    name: 'Shoot',          kind: 'work',   role: 'video',       slaHours: 48, phase: 'work',   color: '#4a3aa7', needsFile: true, fileLabel: 'footage link', nextLabel: 'Shoot done' },
+      { id: 'v-firstcut', name: 'First cut',      kind: 'work',   role: 'video',       slaHours: 48, phase: 'work',   color: '#e87ba4', needsFile: true, fileLabel: 'first-cut link', nextLabel: 'First cut ready' },
+      { id: 'v-final',    name: 'Final edit',     kind: 'work',   role: 'video',       slaHours: 24, phase: 'work',   color: '#2a78d6', needsFile: true, fileLabel: 'final file link', nextLabel: 'Ready for QC' },
+      { id: 'v-qc',       name: 'QC & upload',    kind: 'review', reviewers: ['role:videolead'],      slaHours: 24, editsTo: 'v-final', phase: 'qc', uploads: true, color: '#eb6834' },
+      { id: 'v-done',     name: 'Delivered',      kind: 'end',    role: '',            slaHours: 0,  phase: 'done',   color: '#0ca30c' },
+    ],
+  },
 };
+/* Columns shown when the board is not filtered to one team. */
+const PHASES = [
+  { id: 'brief',    name: 'Brief & assign', color: '#1baf7a' },
+  { id: 'work',     name: 'In production',  color: '#4a3aa7' },
+  { id: 'qc',       name: 'QC',             color: '#eb6834' },
+  { id: 'approval', name: 'Final approval', color: '#2a78d6' },
+  { id: 'done',     name: 'Done',           color: '#0ca30c' },
+];
 const DEFAULT_SETTINGS = {
   prefix: 'BB',
   types: DEFAULT_TYPES,
@@ -58,7 +81,7 @@ const DEFAULT_SETTINGS = {
   notifications: { enabled: true },
 };
 /* Dark-theme steps of the stage colours (validated as a set). */
-const DARK_COLORS = { '#1baf7a': '#199e70', '#4a3aa7': '#9085e9', '#eb6834': '#d95926', '#2a78d6': '#3987e5', '#0ca30c': '#3dbe3d', '#64748b': '#8b98ac', '#0e9384': '#2dd4bf', '#1f4fd1': '#7b98ff', '#c11574': '#ee5ea6' };
+const DARK_COLORS = { '#1baf7a': '#199e70', '#4a3aa7': '#9085e9', '#eb6834': '#d95926', '#2a78d6': '#3987e5', '#0ca30c': '#3dbe3d', '#64748b': '#8b98ac', '#0e9384': '#2dd4bf', '#0e7490': '#22b8cf', '#e87ba4': '#d55181', '#1f4fd1': '#7b98ff', '#c11574': '#ee5ea6' };
 
 /* ---------------- tiny utils ---------------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -324,14 +347,27 @@ const roleColor = (id) => (roleById(id) || {}).color || '#64748B';
 const teamName = (id) => (TEAMS.find((t) => t.id === id) || {}).name || roleName(id);
 const types = () => S.settings.types || [];
 const typeById = (id) => types().find((t) => t.id === id);
-const stages = () => S.flow.stages;
-const stageById = (id) => stages().find((s) => s.id === id);
-const stageIdx = (id) => stages().findIndex((s) => s.id === id);
-const nextStage = (id) => stages()[stageIdx(id) + 1];
-const prevStage = (id) => stages()[stageIdx(id) - 1];
-const boardStages = () => stages().filter((s) => s.kind !== 'start');
-const firstStage = () => stages().find((s) => s.kind !== 'start') || stages()[1];
-const workStage = () => stages().find((s) => s.kind === 'work');
+const TEAM_IDS = ['design', 'video'];
+const flowTeams = () => (S.flow && S.flow.teams) || DEFAULT_FLOW.teams;
+const teamOf = (r) => (r && r.team && flowTeams()[r.team] ? r.team : 'design');
+/* Stages of one team's flow; `stages(r)` takes a request, a team id, or nothing (design). */
+function stages(x) { const t = typeof x === 'string' ? x : teamOf(x); return flowTeams()[t] || flowTeams().design || []; }
+const allStages = () => TEAM_IDS.flatMap((t) => flowTeams()[t] || []);
+const stageById = (id) => allStages().find((s) => s.id === id);
+const stageIdx = (id, r) => stages(r).findIndex((s) => s.id === id);
+const nextStage = (id, r) => stages(r)[stageIdx(id, r) + 1];
+const prevStage = (id, r) => stages(r)[stageIdx(id, r) - 1];
+const boardStages = (x) => stages(x).filter((s) => s.kind !== 'start');
+const firstStage = (x) => stages(x).find((s) => s.kind !== 'start') || stages(x)[1];
+const workStages = (x) => stages(x).filter((s) => s.kind === 'work');
+const workStage = (x) => workStages(x)[0];
+/* A request whose stage is not in its team's flow (an old task after a flow change)
+   is shown at the nearest stage of the same phase, so nothing is ever stranded. */
+function currentStage(r) {
+  const own = stages(r).find((s) => s.id === r.stage); if (own) return own;
+  const old = stageById(r.stage);
+  return (old && stages(r).find((s) => s.phase === old.phase)) || firstStage(r) || null;
+}
 const wh = () => S.settings.workHours;
 const hasRole = (m, r) => !!m && Array.isArray(m.roles) && m.roles.includes(r);
 const isAdmin = (m = S.me) => hasRole(m, 'admin') || (m && sameEmail(m.email, APP.ownerEmail));
@@ -343,7 +379,14 @@ const membersWithRole = (role) => activeMembers().filter((m) => hasRole(m, role)
 const coordinators = () => membersWithRole('coordinator');
 const coordinatorNames = () => coordinators().map((m) => m.name).join(' / ') || 'the coordinator';
 const stageOwnerRole = (st, r) => (st.role === 'team' ? (r && r.team) || 'design' : st.role);
-const assigneeOf = (r) => { const w = workStage(); return w ? (r.assignees || {})[w.id] || null : null; };
+/* Who is doing the work: the person on the current work stage, else the last one set. */
+function assigneeOf(r) {
+  const as = r.assignees || {}; const st = currentStage(r);
+  if (st && st.kind === 'work' && as[st.id]) return as[st.id];
+  const ws = workStages(r);
+  for (let i = ws.length - 1; i >= 0; i--) if (as[ws[i].id]) return as[ws[i].id];
+  return null;
+}
 
 /* ---------------- request metrics ---------------- */
 const currentVisit = (r) => (r.visits || []).find((v) => !v.exitedAt) || null;
@@ -355,7 +398,7 @@ function stageLimitMs(st, r, v) { if (!st) return 0; if (st.slaFrom === 'task') 
 const visitBreached = (v, r) => { const st = stageById(v.stage); const lim = stageLimitMs(st, r, v); if (isDeadlineVisit(v, r)) return (v.exitedAt || now()) > r.tatDeadline; return lim > 0 && visitElapsed(v, r) > lim; };
 function stageTat(r, stageId) { return (r.visits || []).filter((v) => v.stage === stageId).reduce((a, v) => a + visitElapsed(v, r), 0); }
 function slaState(r) {
-  const st = stageById(r.stage), v = currentVisit(r);
+  const st = currentStage(r), v = currentVisit(r);
   if (!st || !v || r.status !== 'open') return { ratio: null, state: 'none', elapsed: v ? visitElapsed(v, r) : 0, limit: 0 };
   const limit = stageLimitMs(st, r, v), elapsed = visitElapsed(v, r);
   if (isDeadlineVisit(v, r)) { const remaining = r.tatDeadline - now(); const ratio = limit > 0 ? elapsed / limit : 2; return { ratio, elapsed, limit, remaining, deadline: r.tatDeadline, state: remaining <= 0 ? 'crit' : ratio >= (S.settings.slaWarnAt || 0.75) ? 'warn' : 'ok' }; }
@@ -368,13 +411,13 @@ const isBreachedNow = (r) => slaState(r).state === 'crit';
 const totalTat = (r) => elapsedMs(r.createdAt, r.completedAt || (r.status === 'open' ? now() : r.updatedAt), wh());
 const isOverdue = (r) => r.status === 'open' && r.dueDate && parseDate(r.dueDate) < now();
 /* Production TAT of the assignee: every visit to the work stage, all rounds. */
-function productionTat(r) { const w = workStage(); return w ? stageTat(r, w.id) : 0; }
+function productionTat(r) { return workStages(r).reduce((a, s) => a + stageTat(r, s.id), 0); }
 function reviewerMatch(spec, r, m = S.me) { if (!m) return false; if (spec === 'requester') return isRequester(r, m); if (String(spec).startsWith('role:')) return hasRole(m, spec.slice(5)); return false; }
 function reviewerLabel(spec, r) { if (spec === 'requester') return r && r.requester ? r.requester.name : 'the requester'; if (String(spec).startsWith('role:')) { const role = spec.slice(5); const ms = membersWithRole(role); return ms.length && ms.length <= 3 ? ms.map((m) => m.name).join(' / ') : roleName(role); } return spec; }
 /* Everyone the task is waiting on right now — the same rule needsMe() uses, by email. */
 function responsibleFor(r) {
   if (!r || r.status !== 'open') return [];
-  const st = stageById(r.stage); if (!st) return [];
+  const st = currentStage(r); if (!st) return [];
   const out = [];
   if (st.kind === 'triage') membersWithRole(st.role).forEach((m) => out.push(lower(m.email)));
   else if (st.kind === 'work') { const a = (r.assignees || {})[st.id]; if (a && a.email) out.push(lower(a.email)); }
@@ -408,7 +451,7 @@ function dateRangeLabel(f) {
 }
 function needsMe(r) {
   if (!S.me || r.status !== 'open') return null;
-  const st = stageById(r.stage); if (!st) return null;
+  const st = currentStage(r); if (!st) return null;
   if (st.kind === 'triage') return hasRole(S.me, st.role) ? 'triage' : null;
   if (st.kind === 'work') { const a = (r.assignees || {})[st.id]; return a && isMe(a) ? 'work' : null; }
   if (st.kind === 'review') return (st.reviewers || []).some((spec) => reviewerMatch(spec, r)) ? 'review' : null;
@@ -417,8 +460,10 @@ function needsMe(r) {
 /* ---------------- permissions ---------------- */
 const canCreate = () => !!S.me;
 const canTriage = (r, st) => isAdmin() || hasRole(S.me, st.role);
-const canManageAssignment = (r) => isAdmin() || isCoordinator();
-const canSubmitWork = (r, st) => { const a = (r.assignees || {})[st.id]; return isAdmin() || isMe(a); };
+const canManageAssignment = (r) => isAdmin() || isFlowLead(r);
+const triageRoleOf = (r) => { const t = stages(r).find((s) => s.kind === 'triage'); return t ? t.role : 'coordinator'; };
+const isFlowLead = (r) => isAdmin() || hasRole(S.me, triageRoleOf(r));
+const canSubmitWork = (r, st) => { const a = (r.assignees || {})[st.id]; return isAdmin() || isMe(a) || isFlowLead(r); };
 const canReview = (r, st) => isAdmin() || (st.reviewers || []).some((spec) => reviewerMatch(spec, r));
 const canEditRequest = (r) => isAdmin() || isRequester(r) || isCoordinator();
 const canAddDeliverable = (r) => !!S.me;
@@ -436,11 +481,11 @@ function enterStage(r, stageId) {
 }
 /* Step 11 — on final approval, store the assignee's turnaround on the task. */
 function finalizeResult(r) {
-  const w = workStage(); const a = w ? (r.assignees || {})[w.id] : null;
-  const prod = w ? (r.visits || []).filter((v) => v.stage === w.id) : [];
+  const a = assigneeOf(r); const wIds = workStages(r).map((s) => s.id);
+  const prod = (r.visits || []).filter((v) => wIds.includes(v.stage));
   const actualMs = prod.reduce((s, v) => s + visitElapsed(v, r), 0);
-  const firstMs = prod.length ? visitElapsed(prod[0], r) : 0;
-  const stageHours = {}; stages().forEach((s) => { if (s.kind !== 'start' && s.kind !== 'end') stageHours[s.id] = Math.round(stageTat(r, s.id) / H * 10) / 10; });
+  const firstMs = prod.length ? prod.filter((v) => (v.round || 1) === 1).reduce((s, v) => s + visitElapsed(v, r), 0) : 0;
+  const stageHours = {}; stages(r).forEach((s) => { if (s.kind !== 'start' && s.kind !== 'end') stageHours[s.id] = Math.round(stageTat(r, s.id) / H * 10) / 10; });
   r.result = {
     assignee: pick(a), team: r.team || null, targetHours: Number(r.tatHours) || 0,
     actualHours: Math.round(actualMs / H * 10) / 10, firstRoundHours: Math.round(firstMs / H * 10) / 10, rounds: r.round || 1,
@@ -469,9 +514,9 @@ async function createRequest(f) {
   const num = await S.store.nextNumber(maxNum);
   const prefix = (S.settings.prefix || 'BB').toUpperCase();
   const id = `${prefix}-${String(num).padStart(4, '0')}`;
-  const ty = typeById(f.typeId) || types()[0]; const first = firstStage(); const start = stages()[0]; const t = now();
+  const ty = typeById(f.typeId) || types()[0]; const team = ty ? ty.team : 'design'; const first = firstStage(team); const start = stages(team)[0]; const t = now();
   const r = {
-    id, num, title: f.title, typeId: ty ? ty.id : null, type: ty ? ty.name : f.typeId, team: ty ? ty.team : 'design', priority: f.priority, dueDate: f.dueDate || null,
+    id, num, title: f.title, typeId: ty ? ty.id : null, type: ty ? ty.name : f.typeId, team, priority: f.priority, dueDate: f.dueDate || null,
     request: f.request, brief: '', refs: f.refs, tatHours: ty ? ty.tatHours : 72,
     requester: pick(S.me), createdAt: t, updatedAt: t, stage: first.id, status: 'open', round: 1,
     assignees: {}, visits: [], deliverables: [], thread: [],
@@ -491,25 +536,32 @@ async function actSaveBrief(id, f) {
   await saveRequest(r, 'Brief saved');
 }
 async function actAssign(id, f) {
-  const r = clone(getReq(id)); const st = stageById(r.stage); const w = workStage();
+  const r = clone(getReq(id)); const st = currentStage(r); const ws = workStages(r); const w = ws[0];
   if (!w) return toast('The flow has no production stage — check Flow.', 'crit');
   const m = activeMembers().find((x) => sameEmail(x.email, f.email));
   if (!m) return toast('Choose who will work on it.', 'crit');
   if (!String(f.brief || '').trim()) return toast('Write the creative brief before assigning.', 'crit');
-  if (!f.tat || !(f.tat.hours > 0)) return toast('Set the TAT for this task.', 'crit');
+  if (w.slaFrom === 'task' && (!f.tat || !(f.tat.hours > 0))) return toast('Set the TAT for this task.', 'crit');
   r.brief = f.brief.trim(); r.team = f.team || r.team; applyTat(r, f.tat);
-  r.assignees ||= {}; r.assignees[w.id] = pick(m); r.assignedAt = now();
-  if (st.kind === 'triage') { closeVisit(r, 'assigned'); enterStage(r, w.id); }
-  r.thread.push(sysMsg(`briefed and assigned to ${m.name} · TAT ${tatLabel(r)}`));
-  await saveRequest(r, `${r.id} assigned to ${m.name} · TAT ${tatLabel(r)}`);
+  r.assignees ||= {}; ws.forEach((s) => { r.assignees[s.id] = pick(m); }); r.assignedAt = now();
+  if (f.noShoot) r.noShoot = true;
+  if (st.kind === 'triage') { closeVisit(r, 'assigned'); enterStage(r, f.noShoot && w.skipTo ? w.skipTo : w.id); }
+  const tatNote = w.slaFrom === 'task' ? ` · TAT ${tatLabel(r)}` : '';
+  r.thread.push(sysMsg(`briefed and assigned to ${m.name}${tatNote}`));
+  await saveRequest(r, `${r.id} assigned to ${m.name}${tatNote}`);
 }
-async function actReassign(id, email) {
-  const r = clone(getReq(id)); const w = workStage();
+/* Reassign one stage (`scope: 'stage'`) or every remaining work stage. */
+async function actReassign(id, email, scope) {
+  const r = clone(getReq(id)); const cur = currentStage(r); const ws = workStages(r);
   const m = email ? activeMembers().find((x) => sameEmail(x.email, email)) : null;
   if (!m) return toast('That teammate is not on the roster.', 'crit');
-  r.assignees ||= {}; r.assignees[w.id] = pick(m); const v = currentVisit(r); if (v && v.stage === w.id) v.assignee = pick(m);
-  r.thread.push(sysMsg(`reassigned production to ${m.name}`));
-  await saveRequest(r, `Reassigned to ${m.name}`);
+  r.assignees ||= {};
+  const targets = scope === 'stage' && cur && cur.kind === 'work' ? [cur] : ws.filter((s) => stageIdx(s.id, r) >= stageIdx((cur || ws[0]).id, r));
+  targets.forEach((s) => { r.assignees[s.id] = pick(m); });
+  const v = currentVisit(r); if (v && targets.some((s) => s.id === v.stage)) v.assignee = pick(m);
+  const what = targets.length === 1 ? targets[0].name : 'the remaining stages';
+  r.thread.push(sysMsg(`moved ${what} to ${m.name}`));
+  await saveRequest(r, `${what} → ${m.name}`);
 }
 async function actSetTat(id, tat) {
   const r = clone(getReq(id)); if (!tat || !(tat.hours > 0)) return toast('TAT must be more than zero.', 'crit');
@@ -517,25 +569,31 @@ async function actSetTat(id, tat) {
   await saveRequest(r, `TAT set to ${tatLabel(r)}`);
 }
 /* Step 8 — the assignee submits; the QC task appears for the coordinator. */
-async function actSubmit(id) {
-  const r = clone(getReq(id)); const st = stageById(r.stage); const nx = nextStage(r.stage);
-  if (!nx) return toast('This is the last stage of the flow.', 'crit');
-  if (st.needsFile && !(r.deliverables || []).some((d) => d.round === r.round)) return toast('Add the final file link before submitting.', 'crit');
-  closeVisit(r, 'submitted'); enterStage(r, nx.id);
-  r.thread.push(sysMsg(`submitted ${st.name} → ${nx.name}`));
-  await saveRequest(r, `Submitted — now in ${nx.name}`);
+async function actSubmit(id, opts = {}) {
+  const r = clone(getReq(id)); const st = currentStage(r);
+  const target = opts.skip && st.skipTo ? stageById(st.skipTo) : nextStage(st.id, r);
+  if (!target) return toast('This is the last stage of the flow.', 'crit');
+  if (!opts.skip && st.needsFile && !(r.deliverables || []).some((d) => d.round === r.round && d.stage === st.id)) return toast(`Add the ${st.fileLabel || 'final file link'} before moving on.`, 'crit');
+  if (opts.skip) r.noShoot = true;
+  closeVisit(r, opts.skip ? 'skipped' : 'submitted'); enterStage(r, target.id);
+  r.thread.push(sysMsg(opts.skip ? `skipped ${st.name} → ${target.name}` : `${st.nextLabel || 'completed ' + st.name} → ${target.name}`));
+  await saveRequest(r, opts.skip ? `${st.name} skipped — now in ${target.name}` : `${st.name} done — now in ${target.name}`);
 }
 /* Steps 9, 10 — approvals; edits loop back to production as a new round. */
-async function actApprove(id, note) {
-  const r = clone(getReq(id)); const st = stageById(r.stage); const nx = nextStage(r.stage);
+async function actApprove(id, note, upload) {
+  const r = clone(getReq(id)); const st = currentStage(r); const nx = nextStage(st.id, r);
   if (!nx) return toast('No stage after this one — check the flow.', 'crit');
+  if (st.uploads) {
+    if (!upload || !isUrl(upload)) return toast('Paste the link to the uploaded file.', 'crit');
+    r.deliverables ||= []; r.deliverables.push({ url: upload.trim(), label: 'Uploaded file', by: pick(S.me), at: now(), round: r.round || 1, stage: st.id, uploaded: true });
+  }
   closeVisit(r, 'approved'); enterStage(r, nx.id);
-  r.thread.push({ at: now(), by: pick(S.me), kind: 'approval', text: note || `${st.name} approved.` });
+  r.thread.push({ at: now(), by: pick(S.me), kind: 'approval', text: note || (st.uploads ? 'QC passed and uploaded.' : `${st.name} approved.`) });
   await saveRequest(r, nx.kind === 'end' ? `${r.id} approved — TAT ${fmtDur(productionTat(r))} recorded for ${assigneeOf(r) ? assigneeOf(r).name : 'the assignee'}` : `${st.name} approved — now in ${nx.name}`);
 }
 async function actRequestEdits(id, note) {
-  const r = clone(getReq(id)); const st = stageById(r.stage);
-  const target = stageById(st.editsTo) || workStage();
+  const r = clone(getReq(id)); const st = currentStage(r);
+  const target = stages(r).find((s) => s.id === st.editsTo) || workStage(r);
   if (!target) return toast('No stage to send edits to — check the flow.', 'crit');
   r.round = (r.round || 1) + 1;
   closeVisit(r, 'edits'); enterStage(r, target.id);
@@ -543,7 +601,7 @@ async function actRequestEdits(id, note) {
   await saveRequest(r, `Sent back to ${target.name} (round ${r.round})`);
 }
 async function actReopen(id) {
-  const r = clone(getReq(id)); const target = workStage() || firstStage();
+  const r = clone(getReq(id)); const target = workStage(r) || firstStage(r);
   r.round = (r.round || 1) + 1; delete r.result;
   closeVisit(r, 'reopened'); enterStage(r, target.id);
   r.thread.push(sysMsg(`reopened the request → ${target.name}`));
@@ -558,14 +616,15 @@ async function actCancel(id, note) {
 async function actComment(id, text) { const r = clone(getReq(id)); r.thread.push({ at: now(), by: pick(S.me), kind: 'comment', text }); await saveRequest(r); }
 async function actAddDeliverable(id, url, label) {
   const r = clone(getReq(id)); r.deliverables ||= [];
-  r.deliverables.push({ url, label: label || url.replace(/^https?:\/\//, '').slice(0, 60), by: pick(S.me), at: now(), round: r.round || 1 });
+  const cs = currentStage(r);
+  r.deliverables.push({ url, label: label || url.replace(/^https?:\/\//, '').slice(0, 60), by: pick(S.me), at: now(), round: r.round || 1, stage: cs ? cs.id : null });
   r.thread.push(sysMsg(`added a file link${label ? ': ' + label : ''}`));
   await saveRequest(r, 'File link added');
 }
 async function actEdit(id, f) {
   const r = clone(getReq(id)); const ty = typeById(f.typeId);
   Object.assign(r, { title: f.title, request: f.request, typeId: ty ? ty.id : r.typeId, type: ty ? ty.name : r.type, priority: f.priority, dueDate: f.dueDate || null, refs: f.refs });
-  if (ty && stageById(r.stage) && stageById(r.stage).kind === 'triage') { r.team = ty.team; if (!r.assignedAt) r.tatHours = ty.tatHours; }
+  if (ty && currentStage(r) && currentStage(r).kind === 'triage') { if (ty.team !== r.team) { r.team = ty.team; r.stage = firstStage(ty.team).id; const v = currentVisit(r); if (v) v.stage = r.stage; } if (!r.assignedAt) r.tatHours = ty.tatHours; }
   r.thread.push(sysMsg('updated the request details'));
   await saveRequest(r, 'Request updated');
 }
@@ -592,7 +651,7 @@ async function removeMember(id) {
 }
 async function saveFlow(flow) {
   flow.version = (S.flow.version || 0) + 1; flow.updatedAt = now(); flow.updatedBy = S.me && S.me.email;
-  S.flow = flow; renderAll(false);
+  S.flow = normalizeFlow(flow); renderAll(false);
   try { await S.store.set('config', 'flow', flow); toast(`Flow saved (v${flow.version})`); } catch (e) { toast(friendlyError(e), 'crit'); }
 }
 async function saveSettings(settings, msg = 'Settings saved') {
@@ -615,13 +674,14 @@ function metrics() {
   const avgE2E = recentDone.length ? recentDone.reduce((a, r) => a + totalTat(r), 0) / recentDone.length : null;
   const withResult = recentDone.filter((r) => r.result && r.result.targetHours > 0);
   const tatMet = withResult.length ? withResult.filter((r) => r.result.met).length / withResult.length : null;
-  const wip = boardStages().filter((s) => s.kind !== 'end').map((s) => ({ stage: s, count: open.filter((r) => r.stage === s.id).length, breached: open.filter((r) => r.stage === s.id && isBreachedNow(r)).length }));
-  const tat = stages().filter((s) => s.kind === 'triage' || s.kind === 'work' || s.kind === 'review').map((s) => {
+  const inPhase = (r, p) => { const st = currentStage(r); return st && st.phase === p; };
+  const wip = PHASES.filter((p) => p.id !== 'done').map((p) => ({ stage: p, count: open.filter((r) => inPhase(r, p.id)).length, breached: open.filter((r) => inPhase(r, p.id) && isBreachedNow(r)).length }));
+  const tat = allStages().filter((s) => s.kind === 'triage' || s.kind === 'work' || s.kind === 'review').map((s) => {
     const vs = [], lims = []; S.requests.forEach((r) => (r.visits || []).forEach((v) => { if (v.stage === s.id && v.exitedAt) { vs.push(visitElapsed(v, r)); lims.push(stageLimitMs(s, r, v)); } }));
     const avg = vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
     const limit = s.slaFrom === 'task' ? (lims.length ? lims.reduce((a, b) => a + b, 0) / lims.length : 0) : stageLimitMs(s, null);
     return { stage: s, avg, n: vs.length, limit, limitLabel: s.slaFrom === 'task' ? 'avg TAT' : 'SLA' };
-  });
+  }).filter((x) => x.n > 0);
   const weeks = throughputSeries(S.throughputRange);
   const weekAgo = now() - 7 * D;
   // Step 11 — per-person performance from stored results
@@ -654,7 +714,7 @@ function activityFeed(limit = 12) {
   const ev = [];
   S.requests.forEach((r) => {
     ev.push({ at: r.createdAt, by: r.requester, r, icon: 'plus', cls: 'accent', text: `raised <b>${esc(r.id)}</b> ${esc(r.title)}` });
-    (r.visits || []).forEach((v) => { if (v.exitedAt && v.action && v.action !== 'submitted' || (v.action === 'submitted' && stageById(v.stage) && stageById(v.stage).kind === 'work')) { const st = stageById(v.stage); const map = { assigned: [`briefed and assigned <b>${esc(r.id)}</b>`, 'clipboard', ''], submitted: [`submitted <b>${esc(r.id)}</b> for QC`, 'send', ''], approved: [st && st.kind === 'review' && nextStage(v.stage) && nextStage(v.stage).kind === 'end' ? `gave final approval on <b>${esc(r.id)}</b>` : `passed <b>${esc(st ? st.name : v.stage)}</b> on <b>${esc(r.id)}</b>`, 'check', 'good'], edits: [`sent <b>${esc(r.id)}</b> back for changes (round ${(v.round || 1) + 1})`, 'rotate', 'crit'], cancelled: [`cancelled <b>${esc(r.id)}</b>`, 'x', ''], reopened: [`reopened <b>${esc(r.id)}</b>`, 'rotate', ''] }[v.action]; if (map) ev.push({ at: v.exitedAt, by: v.by, r, icon: map[1], cls: map[2], text: map[0] }); } });
+    (r.visits || []).forEach((v) => { if (v.exitedAt && v.action && v.action !== 'submitted' || (v.action === 'submitted' && stageById(v.stage) && stageById(v.stage).kind === 'work')) { const st = stageById(v.stage); const map = { assigned: [`briefed and assigned <b>${esc(r.id)}</b>`, 'clipboard', ''], skipped: [`skipped <b>${esc(st ? st.name : v.stage)}</b> on <b>${esc(r.id)}</b>`, 'arrowRight', ''], submitted: [`${esc(st && st.nextLabel ? st.nextLabel.toLowerCase() : 'submitted')} on <b>${esc(r.id)}</b>`, 'send', ''], approved: [st && st.kind === 'review' && nextStage(v.stage, r) && nextStage(v.stage, r).kind === 'end' ? `gave final approval on <b>${esc(r.id)}</b>` : `passed <b>${esc(st ? st.name : v.stage)}</b> on <b>${esc(r.id)}</b>`, 'check', 'good'], edits: [`sent <b>${esc(r.id)}</b> back for changes (round ${(v.round || 1) + 1})`, 'rotate', 'crit'], cancelled: [`cancelled <b>${esc(r.id)}</b>`, 'x', ''], reopened: [`reopened <b>${esc(r.id)}</b>`, 'rotate', ''] }[v.action]; if (map) ev.push({ at: v.exitedAt, by: v.by, r, icon: map[1], cls: map[2], text: map[0] }); } });
     (r.deliverables || []).forEach((d) => ev.push({ at: d.at, by: d.by, r, icon: 'link', cls: '', text: `added a file on <b>${esc(r.id)}</b>: ${esc(d.label)}` }));
     (r.thread || []).forEach((m) => { if (m.kind === 'comment') ev.push({ at: m.at, by: m.by, r, icon: 'message', cls: '', text: `commented on <b>${esc(r.id)}</b>: ${esc(m.text.slice(0, 80))}${m.text.length > 80 ? '…' : ''}` }); });
   });
@@ -667,26 +727,26 @@ function teamChip(id) { return id ? `<span class="chip outline">${esc(teamName(i
 function prioHtml(p) { const k = lower(p); return `<span class="prio p-${attr(k)}"><i></i>${esc(p || 'Normal')}</span>`; }
 /* Who the ball is with, per stage kind. */
 function personFor(r) {
-  const st = stageById(r.stage); if (!st) return null;
+  const st = currentStage(r); if (!st) return null;
   if (st.kind === 'triage') { const cs = membersWithRole(st.role); return cs.length === 1 ? pick(cs[0]) : cs.length ? { name: roleName(st.role) } : null; }
   if (st.kind === 'work') return (r.assignees || {})[st.id] || null;
   if (st.kind === 'review') { const specs = st.reviewers || []; if (specs.includes('requester')) return r.requester || null; const role = (specs.find((s) => String(s).startsWith('role:')) || '').slice(5); const cs = membersWithRole(role); return cs.length === 1 ? pick(cs[0]) : cs.length ? { name: roleName(role) } : null; }
   return r.requester || null;
 }
 function slaLine(r, compact = false) {
-  const s = slaState(r); const st = stageById(r.stage);
+  const s = slaState(r); const st = currentStage(r);
   if (r.status !== 'open') { const res = r.result; return `<div class="sla-line"><span>${r.status === 'done' ? (res ? `TAT ${fmtDur((res.actualHours || 0) * H)} / ${fmtTat(res.targetHours)}` : 'Approved') : 'Cancelled'}</span>${res ? `<span class="${res.met ? 'good' : 'crit'}" style="font-weight:600;color:var(--${res.met ? 'good' : 'crit'})">${res.met ? 'on time' : 'late'}</span>` : ''}</div>`; }
   if (s.state === 'none') return `<div class="meter none"></div><div class="sla-line"><span>${compact ? 'In stage' : 'In ' + esc(st ? st.name : '')}</span><span class="t">${fmtDur(s.elapsed)} · no limit</span></div>`;
   const pct = clamp(s.ratio * 100, 0, 100); const isTat = st && st.slaFrom === 'task';
   const label = s.state === 'crit' ? `<span class="crit">${isTat ? 'TAT' : 'SLA'} over by ${fmtDur(-s.remaining)}</span>` : s.state === 'warn' ? `<span class="warn">${fmtDur(s.remaining)} left</span>` : `<span>${fmtDur(s.remaining)} left</span>`;
   return `<div class="meter ${s.state === 'ok' ? '' : s.state}"><i style="width:${pct.toFixed(1)}%"></i></div><div class="sla-line"><span class="t">${isTat && r.tatDeadline ? 'due ' + fmtDeadline(r.tatDeadline) : fmtDur(s.elapsed) + ' / ' + (isTat ? fmtTat(r.tatHours) : st.slaHours + 'h')}</span>${label}</div>`;
 }
-function cardHtml(r) {
-  const st = stageById(r.stage); const a = personFor(r); const breached = isBreachedNow(r); const due = fmtDue(r.dueDate, r.status);
+function cardHtml(r, showStage) {
+  const st = currentStage(r); const a = personFor(r); const breached = isBreachedNow(r); const due = fmtDue(r.dueDate, r.status);
   return `<article class="card ${breached ? 'breached' : ''}" data-open="${attr(r.id)}" data-flip-id="${attr(r.id)}" style="--stage:${attr(themed(st ? st.color : '#888'))}" tabindex="0" role="button" aria-label="${attr(r.id + ' ' + r.title)}">
     <div class="c-top"><span class="c-id">${esc(r.id)}</span>${r.round > 1 ? `<span class="round" title="Revision round">R${r.round}</span>` : ''}${r.sample ? '<span class="chip tiny" title="Sample data">sample</span>' : ''}<span style="flex:1"></span>${breached ? `<span class="breach-flag pulse">${ic('alert')}${st && st.slaFrom === 'task' ? 'TAT' : 'SLA'}</span>` : ''}</div>
     <div class="c-title">${esc(r.title)}</div>
-    <div class="c-meta"><span class="chip outline">${esc(r.type)}</span>${prioHtml(r.priority)}<span class="tiny ${due.cls}" style="margin-left:auto">${esc(due.text)}</span></div>
+    <div class="c-meta">${showStage && st ? stageChip(st) : `<span class="chip outline">${esc(r.type)}</span>`}${prioHtml(r.priority)}<span class="tiny ${due.cls}" style="margin-left:auto">${esc(due.text)}</span></div>
     ${slaLine(r, true)}
     <div class="c-foot">${whoHtml(a, 'sm', st && st.kind === 'triage' ? 'No coordinator yet' : 'Unassigned')}<span class="tiny muted" title="Raised by ${attr(r.requester ? r.requester.name : '')}">by ${esc(firstName(r.requester) || '?')}</span></div>
   </article>`;
@@ -776,7 +836,7 @@ function viewDashboard() {
       ${perf.length ? perf.map((p) => `<tr><td>${whoHtml(p.person)}</td><td>${teamChip(p.team)}</td><td class="num">${p.open || '—'}</td><td class="num">${p.recent || '—'}</td><td class="num">${p.avgActual == null ? '—' : fmtDur(p.avgActual * H)}</td><td class="num muted">${p.avgTarget == null ? '—' : fmtDur(p.avgTarget * H)}</td><td>${p.onTime == null ? '<span class="muted">—</span>' : `<span class="chip ${p.onTime >= 0.8 ? 'good' : p.onTime >= 0.5 ? 'warn' : 'crit'}">${Math.round(p.onTime * 100)}%</span>`}</td><td class="num">${p.avgRounds == null ? '—' : p.avgRounds.toFixed(1)}</td><td class="num muted">${p.done || '—'}</td></tr>`).join('') : `<tr><td colspan="9">${emptyHtml('award', 'No completed tasks yet')}</td></tr>`}
     </tbody></table></div></div>
     <div class="grid two">
-      <div class="panel" data-anim><div class="panel-head"><div><h2>Needs attention</h2><div class="sub">Over SLA / TAT, or past the due date</div></div>${attention.length ? `<span class="badge crit">${attention.length}</span>` : ''}</div><div class="panel-body" style="padding-top:6px">${attention.length ? `<div class="list">${attention.map((r) => { const s = slaState(r); const st = stageById(r.stage); const due = fmtDue(r.dueDate, r.status); return `<div class="list-item" data-open="${attr(r.id)}">${personHtml(personFor(r), 'sm')}<div class="li-main"><div class="li-title">${esc(r.id)} · ${esc(r.title)}</div><div class="li-sub">${esc(st ? st.name : '')} · ${s.state === 'crit' ? `<span style="color:var(--crit);font-weight:600">over by ${fmtDur(-s.remaining)}</span>` : `in stage ${fmtDur(s.elapsed)}`}${isOverdue(r) ? ` · <span style="color:var(--crit)">${esc(due.text)}</span>` : ''}</div></div>${stageChip(st)}</div>`; }).join('')}</div>` : emptyHtml('check', 'Everything is inside its limits and due dates')}</div></div>
+      <div class="panel" data-anim><div class="panel-head"><div><h2>Needs attention</h2><div class="sub">Over SLA / TAT, or past the due date</div></div>${attention.length ? `<span class="badge crit">${attention.length}</span>` : ''}</div><div class="panel-body" style="padding-top:6px">${attention.length ? `<div class="list">${attention.map((r) => { const s = slaState(r); const st = currentStage(r); const due = fmtDue(r.dueDate, r.status); return `<div class="list-item" data-open="${attr(r.id)}">${personHtml(personFor(r), 'sm')}<div class="li-main"><div class="li-title">${esc(r.id)} · ${esc(r.title)}</div><div class="li-sub">${esc(st ? st.name : '')} · ${s.state === 'crit' ? `<span style="color:var(--crit);font-weight:600">over by ${fmtDur(-s.remaining)}</span>` : `in stage ${fmtDur(s.elapsed)}`}${isOverdue(r) ? ` · <span style="color:var(--crit)">${esc(due.text)}</span>` : ''}</div></div>${stageChip(st)}</div>`; }).join('')}</div>` : emptyHtml('check', 'Everything is inside its limits and due dates')}</div></div>
       <div class="panel" data-anim><div class="panel-head"><div><h2>Recent activity</h2><div class="sub">Across every request</div></div></div><div class="panel-body" style="padding-top:6px">${activityFeed(10).map((e) => `<div class="act" data-open="${attr(e.r.id)}" style="cursor:pointer"><div class="ico ${e.cls}">${ic(e.icon, 'sm')}</div><div class="txt"><b>${esc(e.by ? e.by.name : 'Someone')}</b> ${e.text}</div><div class="when">${fmtRel(e.at)}</div></div>`).join('') || emptyHtml('message', 'No activity yet')}</div></div>
     </div>
   </div>`;
@@ -792,7 +852,7 @@ function filteredRequests() {
     if (f.mine && !(needsMe(r) || isRequester(r) || Object.values(r.assignees || {}).some(isMe))) return false;
     if (f.breached && !isBreachedNow(r)) return false;
     if (f.person) {
-      if (f.person === '__none') { const st = stageById(r.stage); if (!(r.status === 'open' && st && st.kind === 'work' && !(r.assignees || {})[st.id])) return false; }
+      if (f.person === '__none') { const st = currentStage(r); if (!(r.status === 'open' && st && st.kind === 'work' && !(r.assignees || {})[st.id])) return false; }
       else {
         const e = lower(f.person); const is = (p) => !!p && lower(p.email) === e;
         const involved = responsibleFor(r).includes(e) || Object.values(r.assignees || {}).some(is) || is(r.requester);
@@ -815,7 +875,7 @@ function filtersHtml() {
     <select class="input sm" data-filter="team" aria-label="Filter by team" style="width:auto"><option value="">Both teams</option>${TEAMS.map((t) => `<option value="${attr(t.id)}" ${f.team === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
     <select class="input sm" data-filter="type" aria-label="Filter by type" style="width:auto"><option value="">All types</option>${types().map((t) => `<option value="${attr(t.id)}" ${f.type === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
     <select class="input sm" data-filter="prio" aria-label="Filter by priority" style="width:auto"><option value="">All priorities</option>${S.settings.priorities.map((t) => `<option ${f.prio === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
-    ${S.boardMode === 'list' ? `<select class="input sm" data-filter="stage" aria-label="Filter by stage" style="width:auto"><option value="">All stages</option>${stages().filter((s) => s.kind !== 'start').map((s) => `<option value="${attr(s.id)}" ${f.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
+    ${S.boardMode === 'list' ? `<select class="input sm" data-filter="stage" aria-label="Filter by stage" style="width:auto"><option value="">All stages</option>${TEAM_IDS.filter((t) => !f.team || f.team === t).map((t) => `<optgroup label="${attr(teamName(t))}">${stages(t).filter((s) => s.kind !== 'start').map((s) => `<option value="${attr(s.id)}" ${f.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}</select>` : ''}
     ${peopleSelectHtml(f.person)}
     <div class="pop-wrap"><button class="btn sm ${f.from || f.to ? 'primary' : ''}" data-action="date-pop" aria-haspopup="true">${ic('calendar', 'sm')}${esc(dateRangeLabel(f))}</button>${dateRangePopHtml(f)}</div>
     <button class="btn sm ${f.mine ? 'primary' : ''}" data-toggle="mine">${ic('user', 'sm')}Mine</button>
@@ -872,41 +932,49 @@ function personSummaryHtml(email) {
 }
 function viewBoard() {
   const rs = filteredRequests();
-  const head = `<div class="page-head" data-anim><div><h1>Requests</h1><p class="lede">Every requirement moving through ${stages().filter((s) => s.kind !== 'start' && s.kind !== 'end').map((s) => s.name).join(' → ')}.</p></div><div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>`;
+  const team = S.filters.team;
+  const flowLine = (t) => stages(t).filter((s) => s.kind !== 'start' && s.kind !== 'end').map((s) => s.name).join(' → ');
+  const lede = team ? `${esc(teamName(team))}: ${esc(flowLine(team))}.` : `Graphic design and video editing each run their own flow — pick a team to see its stages. <span class="muted">${esc(flowLine('video'))}</span>`;
+  const head = `<div class="page-head" data-anim><div><h1>Requests</h1><p class="lede">${lede}</p></div><div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>`;
   const summary = S.filters.person ? personSummaryHtml(S.filters.person) : '';
   if (S.boardMode === 'list') return head + filtersHtml() + summary + viewList(rs);
-  const cols = boardStages().map((st) => {
-    let items = rs.filter((r) => r.stage === st.id && r.status === 'open').sort((a, b) => (slaState(b).ratio || 0) - (slaState(a).ratio || 0));
-    if (st.kind === 'end') items = rs.filter((r) => r.stage === st.id && r.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)).slice(0, 12);
+  const byPhase = !team;
+  const cols = (team ? boardStages(team) : PHASES).map((col) => {
+    const inCol = (r) => { const st = currentStage(r); return st && (byPhase ? st.phase === col.id : st.id === col.id); };
+    const isEnd = byPhase ? col.id === 'done' : col.kind === 'end';
+    let items = rs.filter((r) => inCol(r) && r.status === 'open').sort((a, b) => (slaState(b).ratio || 0) - (slaState(a).ratio || 0));
+    if (isEnd) items = rs.filter((r) => inCol(r) && r.status === 'done').sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)).slice(0, 12);
     const breached = items.filter(isBreachedNow).length;
-    const lim = st.slaFrom === 'task' ? 'TAT per task' : st.slaHours ? `SLA ${st.slaHours}h` : '';
-    return `<section class="col" style="--stage:${attr(themed(st.color))}" data-anim><div class="col-head"><span class="swatch"></span><h3>${esc(st.name)}</h3>${lim ? `<span class="sla">${esc(lim)}</span>` : ''}<span class="count">${items.length}${breached ? ` <span style="color:var(--crit)">· ${breached}!</span>` : ''}</span></div><div class="col-body">${items.map(cardHtml).join('') || `<div class="col-empty">${st.kind === 'end' ? 'Nothing approved yet' : 'Nothing here'}</div>`}</div></section>`;
+    const lim = byPhase ? '' : col.slaFrom === 'task' ? 'TAT per task' : col.slaHours ? `SLA ${col.slaHours}h` : '';
+    return `<section class="col" style="--stage:${attr(themed(col.color))}" data-anim><div class="col-head"><span class="swatch"></span><h3>${esc(col.name)}</h3>${lim ? `<span class="sla">${esc(lim)}</span>` : ''}<span class="count">${items.length}${breached ? ` <span style="color:var(--crit)">· ${breached}!</span>` : ''}</span></div><div class="col-body">${items.map((r) => cardHtml(r, byPhase)).join('') || `<div class="col-empty">${isEnd ? 'Nothing delivered yet' : 'Nothing here'}</div>`}</div></section>`;
   }).join('');
   const cancelled = rs.filter((r) => r.status === 'cancelled').length;
   return head + filtersHtml() + summary + `<div class="board" id="board">${cols}</div>${cancelled ? `<p class="small muted" style="margin-top:8px">${plural(cancelled, 'cancelled request')} hidden from the board — switch to List to see them.</p>` : ''}`;
 }
 function viewList(rs) {
   const k = S.sort.key, dir = S.sort.dir === 'asc' ? 1 : -1;
-  const val = (r) => ({ id: r.num, title: lower(r.title), type: r.type, team: r.team, priority: S.settings.priorities.indexOf(r.priority), stage: stageIdx(r.stage), assignee: lower((assigneeOf(r) || {}).name), tat: r.tatHours || 0, inStage: slaState(r).elapsed, sla: slaState(r).ratio ?? -1, due: r.dueDate || '9999', updatedAt: r.updatedAt })[k];
+  const val = (r) => ({ id: r.num, title: lower(r.title), type: r.type, team: r.team, priority: S.settings.priorities.indexOf(r.priority), stage: stageIdx(r.stage, r), assignee: lower((assigneeOf(r) || {}).name), tat: r.tatHours || 0, inStage: slaState(r).elapsed, sla: slaState(r).ratio ?? -1, due: r.dueDate || '9999', updatedAt: r.updatedAt })[k];
   const sorted = [...rs].sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
   const th = (key, label) => `<th><button data-sort="${key}">${esc(label)}${k === key ? ic(S.sort.dir === 'asc' ? 'up' : 'down', 'sm') : ''}</button></th>`;
   return `<div class="panel" data-anim><div class="table-wrap"><table class="tbl"><thead><tr>${th('id', 'ID')}${th('title', 'Title')}${th('type', 'Type')}${th('stage', 'Stage')}${th('assignee', 'Assignee')}${th('tat', 'TAT')}${th('inStage', 'In stage')}${th('sla', 'Limit')}${th('due', 'Due')}${th('updatedAt', 'Updated')}</tr></thead><tbody>
-    ${sorted.map((r) => { const st = stageById(r.stage); const s = slaState(r); const due = fmtDue(r.dueDate, r.status); return `<tr class="link" data-open="${attr(r.id)}"><td class="num muted">${esc(r.id)}</td><td><b>${esc(r.title)}</b>${r.round > 1 ? ` <span class="round">R${r.round}</span>` : ''}${r.status === 'cancelled' ? ' <span class="chip">cancelled</span>' : ''}<div class="tiny muted">${esc(r.priority)} · by ${esc(r.requester ? r.requester.name : '')}</div></td><td>${esc(r.type)}<div class="tiny muted">${esc(teamName(r.team).replace(' team', ''))}</div></td><td>${stageChip(st)}</td><td>${whoHtml(assigneeOf(r))}</td><td class="num">${fmtTat(r.tatHours)}</td><td class="num">${r.status === 'open' ? fmtDur(s.elapsed) : r.result ? fmtDur(r.result.actualHours * H) : '—'}</td><td>${r.status === 'done' && r.result ? `<span class="chip ${r.result.met ? 'good' : 'crit'}">${r.result.met ? 'on time' : 'late'}</span>` : s.state === 'crit' ? `<span class="breach-flag">${ic('alert')}${fmtDur(-s.remaining)} over</span>` : s.state === 'warn' ? `<span class="chip warn">${fmtDur(s.remaining)} left</span>` : s.state === 'ok' ? `<span class="chip good">on track</span>` : '<span class="muted">—</span>'}</td><td class="${due.cls}">${esc(due.text)}</td><td class="muted small">${fmtRel(r.updatedAt)}</td></tr>`; }).join('') || `<tr><td colspan="10">${emptyHtml('search', 'No requests match these filters')}</td></tr>`}
+    ${sorted.map((r) => { const st = currentStage(r); const s = slaState(r); const due = fmtDue(r.dueDate, r.status); return `<tr class="link" data-open="${attr(r.id)}"><td class="num muted">${esc(r.id)}</td><td><b>${esc(r.title)}</b>${r.round > 1 ? ` <span class="round">R${r.round}</span>` : ''}${r.status === 'cancelled' ? ' <span class="chip">cancelled</span>' : ''}<div class="tiny muted">${esc(r.priority)} · by ${esc(r.requester ? r.requester.name : '')}</div></td><td>${esc(r.type)}<div class="tiny muted">${esc(teamName(r.team).replace(' team', ''))}</div></td><td>${stageChip(st)}</td><td>${whoHtml(assigneeOf(r))}</td><td class="num">${(workStage(r) || {}).slaFrom === 'task' ? fmtTat(r.tatHours) : fmtTat(stages(r).filter((s) => s.kind === 'work').reduce((a, s) => a + (s.slaHours || 0), 0))}</td><td class="num">${r.status === 'open' ? fmtDur(s.elapsed) : r.result ? fmtDur(r.result.actualHours * H) : '—'}</td><td>${r.status === 'done' && r.result ? `<span class="chip ${r.result.met ? 'good' : 'crit'}">${r.result.met ? 'on time' : 'late'}</span>` : s.state === 'crit' ? `<span class="breach-flag">${ic('alert')}${fmtDur(-s.remaining)} over</span>` : s.state === 'warn' ? `<span class="chip warn">${fmtDur(s.remaining)} left</span>` : s.state === 'ok' ? `<span class="chip good">on track</span>` : '<span class="muted">—</span>'}</td><td class="${due.cls}">${esc(due.text)}</td><td class="muted small">${fmtRel(r.updatedAt)}</td></tr>`; }).join('') || `<tr><td colspan="10">${emptyHtml('search', 'No requests match these filters')}</td></tr>`}
   </tbody></table></div></div>`;
 }
 function viewQueue() {
   const open = S.requests.filter((r) => r.status === 'open');
   const by = (kind, pred) => open.filter((r) => needsMe(r) === kind && (!pred || pred(r)));
   const triage = by('triage'), work = by('work');
-  const reviews = open.filter((r) => needsMe(r) === 'review'); const isFinal = (r) => { const st = stageById(r.stage); const nx = nextStage(r.stage); return st && nx && nx.kind === 'end'; };
+  const reviews = open.filter((r) => needsMe(r) === 'review'); const isFinal = (r) => { const st = currentStage(r); const nx = st && nextStage(st.id, r); return st && nx && nx.kind === 'end'; };
   const qc = reviews.filter((r) => !isFinal(r)), approvals = reviews.filter(isFinal);
   const raised = open.filter((r) => isRequester(r) && needsMe(r) !== 'review');
-  const item = (r) => { const st = stageById(r.stage); const s = slaState(r); return `<div class="list-item" data-open="${attr(r.id)}"><div class="li-main"><div class="li-title">${esc(r.id)} · ${esc(r.title)}</div><div class="li-sub">${esc(r.type)} · ${esc(r.priority)} · by ${esc(r.requester ? r.requester.name : '')} · in ${esc(st ? st.name : '')} for ${fmtDur(s.elapsed)}${s.state === 'crit' ? ` · <span style="color:var(--crit);font-weight:600">over limit</span>` : s.state === 'warn' ? ` · <span style="color:var(--warn);font-weight:600">${fmtDur(s.remaining)} left</span>` : ''}</div></div><div class="li-side">${stageChip(st)}</div></div>`; };
+  const item = (r) => { const st = currentStage(r); const s = slaState(r); return `<div class="list-item" data-open="${attr(r.id)}"><div class="li-main"><div class="li-title">${esc(r.id)} · ${esc(r.title)}</div><div class="li-sub">${esc(r.type)} · ${esc(r.priority)} · by ${esc(r.requester ? r.requester.name : '')} · in ${esc(st ? st.name : '')} for ${fmtDur(s.elapsed)}${s.state === 'crit' ? ` · <span style="color:var(--crit);font-weight:600">over limit</span>` : s.state === 'warn' ? ` · <span style="color:var(--warn);font-weight:600">${fmtDur(s.remaining)} left</span>` : ''}</div></div><div class="li-side">${stageChip(st)}</div></div>`; };
   const sec = (title, sub, items, icon) => `<div class="panel" data-anim><div class="panel-head"><div><h2>${esc(title)}</h2><div class="sub">${esc(sub)}</div></div><span class="badge" style="${items.length ? '' : 'background:var(--surface-3);color:var(--ink-3)'}">${items.length}</span></div><div class="panel-body" style="padding-top:6px">${items.length ? `<div class="list">${items.map(item).join('')}</div>` : emptyHtml(icon, 'Nothing here right now')}</div></div>`;
   const sections = [];
-  if (isCoordinator() || isAdmin()) sections.push(sec('To brief & assign', 'New requests waiting for a brief, an owner and a TAT', triage, 'clipboard'));
+  const leadsAnyFlow = isAdmin() || allStages().some((s) => s.kind === 'triage' && hasRole(S.me, s.role));
+  const reviewsAnyFlow = isAdmin() || allStages().some((s) => s.kind === 'review' && (s.reviewers || []).some((sp) => String(sp).startsWith('role:') && hasRole(S.me, sp.slice(5))));
+  if (leadsAnyFlow) sections.push(sec('To brief & assign', 'New requests waiting for a brief and an owner', triage, 'clipboard'));
   sections.push(sec('Assigned to me', 'Tasks in production with you', work, 'inbox'));
-  if (isCoordinator() || isAdmin()) sections.push(sec('To QC', 'Submitted work waiting for your check', qc, 'eye'));
+  if (reviewsAnyFlow) sections.push(sec('To QC', 'Submitted work waiting for your check', qc, 'eye'));
   sections.push(sec('Waiting for my approval', isAdmin() ? 'Final approvals — you or the requester can approve' : 'Your requests that passed QC — approve or ask for changes', approvals, 'check'));
   sections.push(sec('My open requests', 'Requirements you raised, still in progress', raised, 'file'));
   return `<div class="page-head" data-anim><div><h1>My queue</h1><p class="lede">What is waiting on you, ${esc(firstName(S.me))} — ${roles().filter((r) => hasRole(S.me, r.id)).map((r) => r.name).join(', ') || 'no role yet'}.</p></div><div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>
@@ -924,7 +992,7 @@ function viewTeam() {
       ${rows.map((m) => `<tr><td><span class="who">${personHtml(m)}<span class="name">${esc(m.name)}${isMe(m) ? ' <span class="chip accent">you</span>' : ''}</span></span></td><td class="mono small">${esc(m.email)}${m.emailUnconfirmed ? ' <span class="chip warn">confirm</span>' : ''}${m.selfRegistered ? ' <span class="chip">self-signed up</span>' : ''}</td><td><div class="row wrap" style="gap:6px">${(m.roles || []).map((r) => `<span class="role-chip" style="--c:${attr(roleColor(r))}"><i></i>${esc(roleName(r))}</span>`).join('') || '<span class="muted">—</span>'}</div></td><td>${m.active === false ? '<span class="chip">Inactive</span>' : '<span class="chip good">Active</span>'}</td><td class="muted small">${m.addedAt ? fmtDate(m.addedAt) : '—'}</td>${admin ? `<td class="actions"><button class="btn ghost sm icon-only" data-action="edit-member" data-id="${attr(m.id)}" aria-label="Edit ${attr(m.name)}">${ic('edit', 'sm')}</button>${sameEmail(m.email, APP.ownerEmail) ? '' : `<button class="btn ghost sm icon-only" data-action="remove-member" data-id="${attr(m.id)}" aria-label="Remove ${attr(m.name)}">${ic('trash', 'sm')}</button>`}</td>` : ''}</tr>`).join('') || `<tr><td colspan="6">${emptyHtml('users', 'No teammates yet')}</td></tr>`}
     </tbody></table></div></div>
     <div class="grid two">
-      <div class="panel" data-anim><div class="panel-head"><div><h2>Roles</h2><div class="sub">What each role can do in the relay</div></div>${admin ? `<button class="btn sm" data-action="add-role">${ic('plus', 'sm')}Add role</button>` : ''}</div><div class="panel-body" style="padding-top:8px"><div class="list">${roles().map((r) => `<div class="list-item" style="cursor:default"><span class="role-chip" style="--c:${attr(r.color)}"><i></i>${esc(r.name)}</span><div class="li-main"><div class="li-sub" style="white-space:normal">${esc(r.desc || '')} · ${plural(membersWithRole(r.id).length, 'member')}</div></div>${admin && !['admin', 'requester', 'coordinator', 'design', 'video'].includes(r.id) && !stages().some((s) => s.role === r.id) ? `<button class="btn ghost sm icon-only" data-action="remove-role" data-id="${attr(r.id)}" aria-label="Remove role">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')}</div></div></div>
+      <div class="panel" data-anim><div class="panel-head"><div><h2>Roles</h2><div class="sub">What each role can do in the relay</div></div>${admin ? `<button class="btn sm" data-action="add-role">${ic('plus', 'sm')}Add role</button>` : ''}</div><div class="panel-body" style="padding-top:8px"><div class="list">${roles().map((r) => `<div class="list-item" style="cursor:default"><span class="role-chip" style="--c:${attr(r.color)}"><i></i>${esc(r.name)}</span><div class="li-main"><div class="li-sub" style="white-space:normal">${esc(r.desc || '')} · ${plural(membersWithRole(r.id).length, 'member')}</div></div>${admin && !['admin', 'requester', 'coordinator', 'design', 'video'].includes(r.id) && !allStages().some((s) => s.role === r.id) ? `<button class="btn ghost sm icon-only" data-action="remove-role" data-id="${attr(r.id)}" aria-label="Remove role">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')}</div></div></div>
       <div class="panel" data-anim><div class="panel-head"><div><h2>How access works</h2></div></div><div class="panel-body"><div class="stack" style="gap:10px;font-size:13.5px;color:var(--ink-2)">
         <p><b>1. Anyone at Brick&amp;Bolt can raise a request.</b> A ${esc((S.settings.allowedDomains || []).map((d) => '@' + d).join(' / '))} email signs in on first use and gets the Requester role automatically.</p>
         <p><b>2. Every request goes to the coordinator</b> (${esc(coordinatorNames())}), who writes the brief with the requester, assigns it to the design or video team and sets the TAT.</p>
@@ -981,36 +1049,40 @@ function viewRoster() {
 function stageOwnerText(s, r) {
   if (s.kind === 'start') return `Raised by <b>anyone</b>`;
   if (s.kind === 'triage') return `Owned by <b>${esc(roleName(s.role))}</b>`;
-  if (s.kind === 'work') return `Owned by <b>${esc(s.role === 'team' ? 'assigned team member' : roleName(s.role))}</b>`;
+  if (s.kind === 'work') return `Done by <b>${esc(s.role === 'team' ? 'the assigned team member' : roleName(s.role))}</b>`;
   if (s.kind === 'review') return `Approved by <b>${esc((s.reviewers || []).map((sp) => sp === 'requester' ? 'requester' : roleName(sp.slice(5))).join(' or '))}</b>`;
   return 'Terminal';
 }
-function flowDiagram(flow) {
-  const sts = flow.stages;
-  return `<div class="flow-diagram">${sts.map((s) => { const loops = s.kind === 'review' && s.editsTo ? sts.find((x) => x.id === s.editsTo) : null; return `<div class="flow-node" style="--stage:${attr(themed(s.color))}"><div class="fn-name"><i></i>${esc(s.name)}</div><div class="fn-meta">${stageOwnerText(s)}</div><div class="fn-meta">${s.slaFrom === 'task' ? '<b>TAT per task</b>, set at assignment' : s.slaHours ? `SLA <b>${s.slaHours}h</b>` : 'No limit'}${s.needsFile ? ' · needs file link' : ''}</div>${loops ? `<div class="fn-loop">↺ changes go back to ${esc(loops.name)}</div>` : ''}<span class="fn-arrow"></span></div>`; }).join('')}</div>`;
+function flowDiagram(sts) {
+  return `<div class="flow-diagram">${sts.map((s) => { const loops = s.kind === 'review' && s.editsTo ? sts.find((x) => x.id === s.editsTo) : null; const skip = s.skipTo ? sts.find((x) => x.id === s.skipTo) : null; return `<div class="flow-node" style="--stage:${attr(themed(s.color))}"><div class="fn-name"><i></i>${esc(s.name)}</div><div class="fn-meta">${stageOwnerText(s)}</div><div class="fn-meta">${s.slaFrom === 'task' ? '<b>TAT per task</b>, set at assignment' : s.slaHours ? `SLA <b>${s.slaHours}h</b>` : 'No limit'}${s.needsFile ? ` · needs ${esc(s.fileLabel || 'file link')}` : ''}${s.uploads ? ' · uploads the file' : ''}</div>${skip ? `<div class="fn-skip">↷ ${esc(s.skipLabel || 'skip')} → ${esc(skip.name)}</div>` : ''}${loops ? `<div class="fn-loop">↺ changes go back to ${esc(loops.name)}</div>` : ''}<span class="fn-arrow"></span></div>`; }).join('')}</div>`;
 }
 function viewFlow() {
   const admin = isAdmin();
   const f = S.flowDraft || (S.flowDraft = clone(S.flow));
-  const openCounts = {}; S.requests.forEach((r) => { if (r.status === 'open') openCounts[r.stage] = (openCounts[r.stage] || 0) + 1; });
+  const openCounts = {}; S.requests.forEach((r) => { if (r.status === 'open') { const st = currentStage(r); if (st) openCounts[st.id] = (openCounts[st.id] || 0) + 1; } });
   const roleOpts = (sel, withTeam) => (withTeam ? [{ id: 'team', name: 'Assigned team member' }] : []).concat(roles()).map((r) => `<option value="${attr(r.id)}" ${sel === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('');
-  const reviewerPicks = (s) => [{ id: 'requester', name: 'Requester' }].concat(roles().map((r) => ({ id: 'role:' + r.id, name: r.name }))).map((o) => `<label class="check tiny"><input type="checkbox" data-sf="reviewer" value="${attr(o.id)}" ${(s.reviewers || []).includes(o.id) ? 'checked' : ''}>${esc(o.name)}</label>`).join('');
-  const editor = admin ? `<div class="panel" data-anim><div class="panel-head"><div><h2>Edit the flow</h2><div class="sub">Order, owners, SLA hours and rules per stage. Changes apply to new handoffs; requests keep the stage they are in.</div></div><div class="row"><button class="btn sm" data-action="add-stage">${ic('plus', 'sm')}Add stage</button><button class="btn sm ghost" data-action="reset-flow">Discard changes</button><button class="btn sm primary" data-action="save-flow">${ic('check', 'sm')}Save flow</button></div></div>
-    <div class="panel-body">
-    ${f.stages.map((s, i) => `<div class="stage-editor" data-i="${i}"><span class="se-idx">${i + 1}</span>
-      <div class="se-field se-name"><label>Stage</label><div class="row"><input type="color" class="color-dot-input" value="${attr(s.color || '#64748B')}" data-sf="color" aria-label="Stage colour"><input class="input sm" data-sf="name" value="${attr(s.name)}" aria-label="Stage name" placeholder="Stage name"></div></div>
-      <div class="se-field"><label>Kind</label><select class="input sm" data-sf="kind" aria-label="Stage kind" ${i === 0 || i === f.stages.length - 1 ? 'disabled' : ''}><option value="triage" ${s.kind === 'triage' ? 'selected' : ''}>Brief / triage</option><option value="work" ${s.kind === 'work' ? 'selected' : ''}>Work</option><option value="review" ${s.kind === 'review' ? 'selected' : ''}>Approval</option>${s.kind === 'start' ? '<option value="start" selected>Start</option>' : ''}${s.kind === 'end' ? '<option value="end" selected>End</option>' : ''}</select></div>
-      ${s.kind === 'triage' || s.kind === 'work' || s.kind === 'start' ? `<div class="se-field"><label>${s.kind === 'start' ? 'Raised by' : 'Owner'}</label><select class="input sm" data-sf="role" aria-label="Owner role" ${s.kind === 'start' ? 'disabled' : ''}>${roleOpts(s.role, s.kind === 'work')}</select></div>` : ''}
-      ${s.kind === 'review' ? `<div class="se-field" style="flex:1 1 260px"><label>Approved by (any of)</label><div class="row wrap" style="gap:6px 12px">${reviewerPicks(s)}</div></div>` : ''}
-      ${s.kind === 'work' ? `<div class="se-field"><label>Time limit</label><select class="input sm" data-sf="slaFrom" aria-label="Limit source"><option value="task" ${s.slaFrom === 'task' ? 'selected' : ''}>TAT per task (set at assignment)</option><option value="fixed" ${s.slaFrom !== 'task' ? 'selected' : ''}>Fixed SLA hours</option></select></div>` : ''}
-      ${s.kind !== 'start' && s.kind !== 'end' && !(s.kind === 'work' && s.slaFrom === 'task') ? `<div class="se-field se-sla"><label>SLA (h)</label><input class="input sm" type="number" min="0" step="1" data-sf="slaHours" value="${attr(s.slaHours || 0)}" aria-label="SLA hours"></div>` : ''}
-      ${s.kind === 'review' ? `<div class="se-field"><label>Changes go to</label><select class="input sm" data-sf="editsTo" aria-label="Changes go to">${f.stages.filter((x) => x.kind === 'work').map((x) => `<option value="${attr(x.id)}" ${s.editsTo === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>` : ''}
-      ${s.kind === 'work' ? `<div class="se-field se-check"><label class="check"><input type="checkbox" data-sf="needsFile" ${s.needsFile ? 'checked' : ''}>Needs file link</label></div>` : ''}
-      <div class="se-ops"><button class="btn ghost sm icon-only" data-action="stage-up" data-i="${i}" ${i <= 1 || i === f.stages.length - 1 ? 'disabled' : ''} aria-label="Move up">${ic('up', 'sm')}</button><button class="btn ghost sm icon-only" data-action="stage-down" data-i="${i}" ${i === 0 || i >= f.stages.length - 2 ? 'disabled' : ''} aria-label="Move down">${ic('down', 'sm')}</button><button class="btn ghost sm icon-only" data-action="stage-del" data-i="${i}" ${s.kind === 'start' || s.kind === 'end' || openCounts[s.id] ? 'disabled' : ''} title="${openCounts[s.id] ? plural(openCounts[s.id], 'open request') + ' in this stage' : 'Remove stage'}" aria-label="Remove stage">${ic('trash', 'sm')}</button></div>
-    </div>`).join('')}
-    <div class="callout" style="margin-top:14px">A <b>Brief / triage</b> stage is where the coordinator writes the brief, picks the person and sets the TAT. A <b>Work</b> stage is timed against that TAT. An <b>Approval</b> stage can be passed by any of the people ticked; "changes" send the task back to the stage you choose as a new round.</div></div></div>` : '';
-  return `<div class="page-head" data-anim><div><h1>Flow</h1><p class="lede">The flow every request runs through. Version ${S.flow.version || 1}${S.flow.updatedAt ? ` · updated ${fmtRel(S.flow.updatedAt)}` : ''}.</p></div></div>
-  <div class="stack"><div class="panel" data-anim><div class="panel-head"><div><h2>Current flow</h2><div class="sub">Each stage's owner and time limit</div></div></div><div class="panel-body">${flowDiagram(admin ? f : S.flow)}</div></div>${editor}</div>`;
+  const reviewerPicks = (s, team, i) => [{ id: 'requester', name: 'Requester' }].concat(roles().map((r) => ({ id: 'role:' + r.id, name: r.name }))).map((o) => `<label class="check tiny"><input type="checkbox" data-sf="reviewer" data-team="${attr(team)}" value="${attr(o.id)}" ${(s.reviewers || []).includes(o.id) ? 'checked' : ''}>${esc(o.name)}</label>`).join('');
+  const editorFor = (team) => {
+    const sts = f.teams[team] || [];
+    return `<div class="panel-body">
+    ${sts.map((s, i) => `<div class="stage-editor" data-i="${i}" data-team="${attr(team)}"><span class="se-idx">${i + 1}</span>
+      <div class="se-field se-name"><label>Stage</label><div class="row"><input type="color" class="color-dot-input" value="${attr(s.color || '#64748B')}" data-sf="color" data-team="${attr(team)}" aria-label="Stage colour"><input class="input sm" data-sf="name" data-team="${attr(team)}" value="${attr(s.name)}" aria-label="Stage name" placeholder="Stage name"></div></div>
+      <div class="se-field"><label>Kind</label><select class="input sm" data-sf="kind" data-team="${attr(team)}" aria-label="Stage kind" ${i === 0 || i === sts.length - 1 ? 'disabled' : ''}><option value="triage" ${s.kind === 'triage' ? 'selected' : ''}>Brief / triage</option><option value="work" ${s.kind === 'work' ? 'selected' : ''}>Work</option><option value="review" ${s.kind === 'review' ? 'selected' : ''}>Approval</option>${s.kind === 'start' ? '<option value="start" selected>Start</option>' : ''}${s.kind === 'end' ? '<option value="end" selected>End</option>' : ''}</select></div>
+      ${s.kind === 'triage' || s.kind === 'work' || s.kind === 'start' ? `<div class="se-field"><label>${s.kind === 'start' ? 'Raised by' : 'Owner'}</label><select class="input sm" data-sf="role" data-team="${attr(team)}" aria-label="Owner role" ${s.kind === 'start' ? 'disabled' : ''}>${roleOpts(s.role, s.kind === 'work')}</select></div>` : ''}
+      ${s.kind === 'review' ? `<div class="se-field" style="flex:1 1 260px"><label>Approved by (any of)</label><div class="row wrap" style="gap:6px 12px">${reviewerPicks(s, team, i)}</div></div>` : ''}
+      ${s.kind === 'work' ? `<div class="se-field"><label>Time limit</label><select class="input sm" data-sf="slaFrom" data-team="${attr(team)}" aria-label="Limit source"><option value="task" ${s.slaFrom === 'task' ? 'selected' : ''}>TAT per task (set at assignment)</option><option value="fixed" ${s.slaFrom !== 'task' ? 'selected' : ''}>Fixed SLA hours</option></select></div>` : ''}
+      ${s.kind !== 'start' && s.kind !== 'end' && !(s.kind === 'work' && s.slaFrom === 'task') ? `<div class="se-field se-sla"><label>SLA (h)</label><input class="input sm" type="number" min="0" step="1" data-sf="slaHours" data-team="${attr(team)}" value="${attr(s.slaHours || 0)}" aria-label="SLA hours"></div>` : ''}
+      ${s.kind === 'review' ? `<div class="se-field"><label>Changes go to</label><select class="input sm" data-sf="editsTo" data-team="${attr(team)}" aria-label="Changes go to">${sts.filter((x) => x.kind === 'work').map((x) => `<option value="${attr(x.id)}" ${s.editsTo === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>` : ''}
+      ${s.kind === 'work' ? `<div class="se-field se-check"><label class="check"><input type="checkbox" data-sf="needsFile" data-team="${attr(team)}" ${s.needsFile ? 'checked' : ''}>Needs file link</label></div>` : ''}
+      <div class="se-ops"><button class="btn ghost sm icon-only" data-action="stage-up" data-i="${i}" data-team="${attr(team)}" ${i <= 1 || i === sts.length - 1 ? 'disabled' : ''} aria-label="Move up">${ic('up', 'sm')}</button><button class="btn ghost sm icon-only" data-action="stage-down" data-i="${i}" data-team="${attr(team)}" ${i === 0 || i >= sts.length - 2 ? 'disabled' : ''} aria-label="Move down">${ic('down', 'sm')}</button><button class="btn ghost sm icon-only" data-action="stage-del" data-i="${i}" data-team="${attr(team)}" ${s.kind === 'start' || s.kind === 'end' || openCounts[s.id] ? 'disabled' : ''} title="${openCounts[s.id] ? plural(openCounts[s.id], 'open request') + ' in this stage' : 'Remove stage'}" aria-label="Remove stage">${ic('trash', 'sm')}</button></div>
+    </div>`).join('')}</div>`;
+  };
+  const section = (team) => `<div class="panel" data-anim><div class="panel-head"><div><h2>${esc(teamName(team))}</h2><div class="sub">${stages(team).filter((s) => s.kind !== 'start' && s.kind !== 'end').length} stages · ${S.requests.filter((r) => r.status === 'open' && teamOf(r) === team).length} open now</div></div>${admin ? `<div class="row"><button class="btn sm" data-action="add-stage" data-team="${attr(team)}">${ic('plus', 'sm')}Add stage</button></div>` : ''}</div>
+    <div class="panel-body">${flowDiagram((admin ? f.teams : flowTeams())[team] || [])}</div>
+    ${admin ? editorFor(team) : ''}</div>`;
+  return `<div class="page-head" data-anim><div><h1>Flow</h1><p class="lede">Each team runs its own flow. Version ${S.flow.version || 1}${S.flow.updatedAt ? ` · updated ${fmtRel(S.flow.updatedAt)}` : ''}.</p></div>${admin ? `<div class="page-actions"><button class="btn ghost" data-action="reset-flow">Discard changes</button><button class="btn primary" data-action="save-flow">${ic('check')}Save flows</button></div>` : ''}</div>
+  <div class="stack">${TEAM_IDS.map(section).join('')}
+  ${admin ? `<div class="callout">A <b>Brief / triage</b> stage is where the lead writes the brief, picks the person and (for a per-task TAT) sets the hours. <b>Work</b> stages run in order — each has its own SLA and its own assignee, defaulting to the person picked at assignment. An <b>Approval</b> stage can be passed by any of the people ticked; "changes" send the task back to the stage you choose as a new round.</div>` : ''}</div>`;
 }
 function viewSettings() {
   if (!isAdmin()) return `<div class="page-head"><div><h1>Settings</h1><p class="lede">Only admins can change workspace settings.</p></div></div>`;
@@ -1048,8 +1120,9 @@ function viewSettings() {
 
 /* ---------------- request drawer ---------------- */
 function stepperHtml(r) {
-  const cur = stageIdx(r.stage);
-  return `<div class="stepper">${stages().map((s, i) => {
+  const cs = currentStage(r); const cur = cs ? stageIdx(cs.id, r) : 0;
+  return `<div class="stepper">${stages(r).map((s, i) => {
+    if (r.noShoot && s.skippable !== false && s.id === 'v-shoot' && !(r.visits || []).some((v) => v.stage === s.id)) return `<div class="step skipped" style="--stage:${attr(themed(s.color))}"><div class="node">—</div><div class="s-name">${esc(s.name)}</div><div class="s-time">skipped</div></div>`;
     const visits = (r.visits || []).filter((v) => v.stage === s.id); const tat = stageTat(r, s.id); const breached = visits.some((v) => visitBreached(v, r));
     const done = r.status === 'done' ? true : i < cur || (i === cur && r.status !== 'open'); const current = r.status === 'open' && i === cur;
     const lim = s.slaFrom === 'task' ? fmtTat(r.tatHours) : s.slaHours ? `${s.slaHours}h` : '';
@@ -1058,7 +1131,7 @@ function stepperHtml(r) {
   }).join('')}</div>`;
 }
 function limitChip(r) {
-  const s = slaState(r); const st = stageById(r.stage); const word = st && st.slaFrom === 'task' ? 'TAT' : 'SLA';
+  const s = slaState(r); const st = currentStage(r); const word = st && st.slaFrom === 'task' ? 'TAT' : 'SLA';
   if (s.state === 'none') return '';
   if (s.state === 'crit') return `<span class="chip crit">${ic('alert', 'sm')}${word} over by ${fmtDur(-s.remaining)}</span>`;
   return `<span class="chip ${s.state === 'warn' ? 'warn' : 'good'}">${fmtDur(s.remaining)} left · due ${fmtDeadline(s.deadline)}</span>`;
@@ -1077,6 +1150,22 @@ function readTat(form) {
   if (mode === 'deadline') { const v = (form.querySelector('[name=tatDeadline]') || {}).value; const t = v ? new Date(v).getTime() : NaN; if (!t || isNaN(t)) { toast('Pick the date and time the task is due.', 'crit'); return null; } if (t <= now()) { toast('The TAT deadline must be in the future.', 'crit'); return null; } return { hours: Math.max(0.5, Math.round(((t - now()) / H) * 2) / 2), deadline: t }; }
   const h = Number((form.querySelector('[name=tatHours]') || {}).value); if (!(h > 0)) { toast('Enter the TAT in hours.', 'crit'); return null; } return { hours: h, deadline: null };
 }
+/* What each eligible person already has in hand — so the Lead assigns on real load. */
+function workloadOf(email) {
+  const e = lower(email); const open = S.requests.filter((r) => r.status === 'open' && responsibleFor(r).includes(e));
+  const soon = open.filter((r) => { const s = slaState(r); return s.state === 'warn' || s.state === 'crit' || isOverdue(r); });
+  return { open: open.length, soon: soon.length, over: open.filter(isBreachedNow).length };
+}
+function workloadPickerHtml(team, selected, suggested) {
+  const people = membersWithRole(team === 'video' ? 'video' : 'design');
+  if (!people.length) return `<p class="small muted">Nobody holds the ${esc(roleName(team === 'video' ? 'video' : 'design'))} role yet — add it on the Team page.</p>`;
+  const rows = people.map((m) => {
+    const w = workloadOf(m.email); const on = selected ? sameEmail(selected, m.email) : false;
+    const load = w.open === 0 ? 'free' : `${w.open} open${w.soon ? ` · ${w.soon} due soon` : ''}${w.over ? ` · ${w.over} over` : ''}`;
+    return `<label class="load-row ${on ? 'on' : ''}"><input type="radio" name="email" value="${attr(m.email)}" ${on ? 'checked' : ''}>${personHtml(m, 'sm')}<span class="lr-name">${esc(m.name)}${suggested && sameEmail(suggested, m.email) ? ' <span class="chip">usual</span>' : ''}${isMe(m) ? ' <span class="chip accent">you</span>' : ''}</span><span class="lr-load ${w.over ? 'crit' : w.soon ? 'warn' : ''}">${esc(load)}</span></label>`;
+  }).join('');
+  return `<div class="load-list">${rows}</div>`;
+}
 function actionPanelHtml(r) {
   const st = stageById(r.stage); if (!st) return `<div class="action-panel"><h3>Unknown stage</h3><p class="small muted">This request is in a stage that no longer exists in the flow (${esc(r.stage)}). An admin can reopen it.</p>${isAdmin() ? `<div class="actions"><button class="btn sm" data-action="reopen">${ic('rotate', 'sm')}Move to production</button></div>` : ''}</div>`;
   if (r.status === 'cancelled') return `<div class="action-panel"><h3>Cancelled</h3><p class="small muted">This request was cancelled${r.updatedAt ? ' ' + fmtRel(r.updatedAt) : ''}.</p>${canEditRequest(r) ? `<div class="actions"><button class="btn sm" data-action="reopen">${ic('rotate', 'sm')}Reopen</button></div>` : ''}</div>`;
@@ -1085,36 +1174,52 @@ function actionPanelHtml(r) {
   if (st.kind === 'triage') {
     const cs = membersWithRole(st.role);
     if (!canTriage(r, st)) return `<div class="action-panel"><div class="row between wrap"><h3>With ${esc(cs.length ? cs.map((m) => m.name).join(' / ') : roleName(st.role))} for the brief</h3>${lim}</div><p class="small muted">${cs.length ? `${esc(cs.length === 1 ? cs[0].name : 'The coordinator')} will confirm the details with ${isRequester(r) ? 'you' : esc(firstName(r.requester))}, write the creative brief, pick who works on it and set the TAT.` : `Nobody has the ${esc(roleName(st.role))} role yet — an admin needs to assign it under Team.`}</p>${r.brief ? `<div class="divider" style="margin:4px 0"></div><div class="section-title">Creative brief (draft)</div><div class="brief">${esc(r.brief)}</div>` : ''}</div>`;
-    const team = r.team || (typeById(r.typeId) || {}).team || 'design'; const ty = typeById(r.typeId);
-    const eligible = membersWithRole(team); const suggested = ty && ty.goesTo ? eligible.find((m) => lower(ty.goesTo).includes(lower(m.name))) : null; const current = assigneeOf(r);
-    return `<form class="action-panel" data-form="triage"><div class="row between wrap"><h3>${ic('clipboard', 'sm')} Brief &amp; assign</h3>${lim}</div>
-      <div class="field"><label for="t-brief">Creative brief <span class="muted" style="font-weight:400">— confirm the details with ${esc(firstName(r.requester))}, then write what the team should produce</span></label><textarea class="input" id="t-brief" name="brief" rows="5" placeholder="Deliverables and sizes, message and offer, audience, tone, references, must-haves…">${esc(r.brief || '')}</textarea></div>
-      <div class="row wrap" style="gap:12px;align-items:flex-end">
-        <div class="field"><label for="t-team">Team</label><select class="input sm" id="t-team" name="team" data-triage-team>${TEAMS.map((t) => `<option value="${attr(t.id)}" ${team === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
-        <div class="field" style="flex:1;min-width:180px"><label for="t-who">Assign to</label><select class="input sm" id="t-who" name="email" data-triage-who><option value="">${eligible.length ? 'Choose…' : 'No one on this team yet'}</option>${eligible.map((m) => `<option value="${attr(m.email)}" ${(current && sameEmail(current.email, m.email)) || (!current && suggested && sameEmail(suggested.email, m.email)) ? 'selected' : ''}>${esc(m.name)}${suggested && sameEmail(suggested.email, m.email) ? ' (usual)' : ''}</option>`).join('')}</select></div>
-        <div class="field"><label>TAT for this task</label>${tatInput(r.tatHours, r.tatDeadline)}</div>
-      </div>
-      <div class="row between wrap"><span class="tiny muted">Default for ${esc(r.type)}: ${fmtTat(ty ? ty.tatHours : r.tatHours)}. Give a total number of hours, or the exact date &amp; time it is due. The clock starts the moment you assign.</span><div class="actions"><button class="btn sm" type="button" data-action="save-brief">Save brief</button><button class="btn sm primary" type="submit">${ic('arrowRight', 'sm')}Assign &amp; start production</button></div></div>
+    const team = teamOf(r); const ty = typeById(r.typeId);
+    const eligible = membersWithRole(team === 'video' ? 'video' : 'design');
+    const suggested = ty && ty.goesTo ? eligible.find((m) => lower(ty.goesTo).includes(lower(m.name))) : null; const current = assigneeOf(r);
+    const w0 = workStage(r); const taskTat = !!(w0 && w0.slaFrom === 'task');
+    const sla = stages(r).filter((s) => s.kind === 'work' && s.slaHours > 0).map((s) => `${esc(s.name)} ${s.slaHours}h`).join(' · ');
+    const firstWork = w0 ? (w0.skipTo ? w0 : w0) : null;
+    return `<form class="action-panel" data-form="triage"><div class="row between wrap"><h3>${ic('clipboard', 'sm')} ${esc(st.name)} — brief &amp; assign</h3>${lim}</div>
+      <div class="field"><label for="t-brief">Brief <span class="muted" style="font-weight:400">— confirm the details with ${esc(firstName(r.requester))}, then write what the team should produce</span></label><textarea class="input" id="t-brief" name="brief" rows="5" placeholder="Deliverables and sizes, message, audience, tone, references, must-haves…">${esc(r.brief || '')}</textarea></div>
+      <div class="field"><label for="t-team">Team</label><select class="input sm" id="t-team" name="team" data-triage-team style="max-width:220px">${TEAMS.map((t) => `<option value="${attr(t.id)}" ${team === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Assign to <span class="muted" style="font-weight:400">— current workload shown so you can pick on capacity</span></label>${workloadPickerHtml(team, current ? current.email : (suggested ? suggested.email : ''), suggested ? suggested.email : '')}</div>
+      ${taskTat ? `<div class="field" style="max-width:280px"><label>TAT for this task</label>${tatInput(r.tatHours, r.tatDeadline)}<span class="hint">Default for ${esc(r.type)}: ${fmtTat(ty ? ty.tatHours : r.tatHours)}</span></div>`
+        : `${firstWork && firstWork.skipTo ? `<label class="check"><input type="checkbox" name="noShoot" ${r.noShoot ? 'checked' : ''}>${esc(firstWork.skipLabel || 'Skip the first step')} — go straight to ${esc((stageById(firstWork.skipTo) || {}).name || 'the next stage')}</label>` : ''}
+          <p class="tiny muted">Each stage runs on its own SLA${sla ? `: ${sla}` : ''} — change these in Flow.</p>`}
+      <div class="row between wrap"><span class="tiny muted">The clock starts the moment you assign. ${taskTat ? '' : 'The editor you pick is the default for every stage; you can change it per stage later.'}</span><div class="actions"><button class="btn sm" type="button" data-action="save-brief">Save brief</button><button class="btn sm primary" type="submit">${ic('arrowRight', 'sm')}Assign${taskTat ? ' &amp; start production' : ''}</button></div></div>
     </form>`;
   }
   if (st.kind === 'work') {
-    const a = (r.assignees || {})[st.id]; const roundFiles = (r.deliverables || []).filter((d) => d.round === r.round); const needFile = st.needsFile && !roundFiles.length;
-    const s = slaState(r); const team = r.team || 'design'; const eligible = membersWithRole(team);
-    const manage = canManageAssignment(r) ? `<form class="row wrap" data-form="reassign" style="gap:8px;align-items:flex-end"><div class="field"><label>Reassign</label><select class="input sm" name="email" style="min-width:160px"><option value="">Choose…</option>${eligible.map((m) => `<option value="${attr(m.email)}" ${a && sameEmail(a.email, m.email) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div><button class="btn sm" type="submit">Reassign</button><div class="field"><label>TAT</label>${tatInput(r.tatHours, r.tatDeadline)}</div><button class="btn sm" type="button" data-action="set-tat">Update TAT</button></form>` : '';
-    return `<div class="action-panel"><div class="row between wrap"><h3>${esc(st.name)} · round ${r.round || 1}</h3>${lim}</div>
-      <div class="row between wrap"><span class="who">${personHtml(a)}<span class="name">${a ? esc(a.name) + (isMe(a) ? ' (you)' : '') : 'Nobody assigned'}</span></span><span class="small muted">${r.tatDeadline ? `Due <b class="mono">${fmtDeadline(r.tatDeadline)}</b> <span class="muted">(${fmtTat(r.tatHours)} window)</span>` : `TAT <b class="mono">${fmtTat(r.tatHours)}</b>${s.deadline ? ` · due ${fmtDeadline(s.deadline)}` : ''}`}${r.assignedAt ? ` · assigned ${fmtRel(r.assignedAt)}` : ''}</span></div>
-      ${canSubmitWork(r, st) ? `<div class="divider" style="margin:4px 0"></div><div class="row between wrap"><span class="small muted">${needFile ? 'Add the final file link below, then submit for QC.' : `Ready? Submit it to ${esc(coordinatorNames())} for QC.`}</span><div class="actions"><button class="btn sm primary" data-action="submit" ${needFile ? 'disabled' : ''}>${ic('send', 'sm')}Submit for QC</button></div></div>` : `<p class="small muted">${a ? `${esc(a.name)} is working on this.` : 'Waiting for the coordinator to assign it.'}</p>`}
-      ${manage ? `<div class="divider" style="margin:4px 0"></div>${manage}` : ''}
+    const a = (r.assignees || {})[st.id]; const s = slaState(r); const team = teamOf(r);
+    const eligible = membersWithRole(team === 'video' ? 'video' : 'design');
+    const stageFiles = (r.deliverables || []).filter((d) => d.round === r.round && (!d.stage || d.stage === st.id));
+    const needFile = st.needsFile && !stageFiles.length;
+    const nx = nextStage(st.id, r); const skip = st.skipTo ? stageById(st.skipTo) : null;
+    const taskTat = st.slaFrom === 'task';
+    const deadline = s.deadline ? ` · due ${fmtDeadline(s.deadline)}` : '';
+    const limitText = taskTat ? (r.tatDeadline ? `Due <b class="mono">${fmtDeadline(r.tatDeadline)}</b> <span class="muted">(${fmtTat(r.tatHours)} window)</span>` : `TAT <b class="mono">${fmtTat(r.tatHours)}</b>${deadline}`) : (st.slaHours ? `SLA <b class="mono">${st.slaHours}h</b>${deadline}` : 'No limit');
+    const manage = canManageAssignment(r) ? `<form class="row wrap" data-form="reassign" style="gap:8px;align-items:flex-end"><div class="field"><label>Change who is on this</label><select class="input sm" name="email" style="min-width:160px"><option value="">Choose…</option>${eligible.map((m) => { const w = workloadOf(m.email); return `<option value="${attr(m.email)}" ${a && sameEmail(a.email, m.email) ? 'selected' : ''}>${esc(m.name)} — ${w.open} open</option>`; }).join('')}</select></div><div class="field"><label>Applies to</label><select class="input sm" name="scope"><option value="stage">${esc(st.name)} only</option><option value="rest">${esc(st.name)} and the stages after it</option></select></div><button class="btn sm" type="submit">Update</button>${taskTat ? `<div class="field"><label>TAT</label>${tatInput(r.tatHours, r.tatDeadline)}</div><button class="btn sm" type="button" data-action="set-tat">Update TAT</button>` : ''}</form>` : '';
+    const next = canSubmitWork(r, st) ? `<div class="divider" style="margin:4px 0"></div>
+      ${st.needsFile ? `<form data-form="deliverable" class="row wrap" style="gap:8px;margin-bottom:10px"><input class="input sm" name="url" type="url" placeholder="Paste the ${attr(st.fileLabel || 'file link')} (Drive, Dropbox…)" required style="flex:2;min-width:220px"><input class="input sm" name="label" placeholder="Label (optional)" style="flex:1;min-width:120px"><button class="btn sm">${ic('plus', 'sm')}Add link</button></form>${stageFiles.length ? `<div class="stack" style="gap:6px;margin-bottom:10px">${stageFiles.map((d) => `<div class="deliverable">${ic('file', 'sm')}<a href="${attr(d.url)}" target="_blank" rel="noopener">${esc(d.label)}</a><span class="who-when">${esc(d.by ? d.by.name : '')} · ${fmtRel(d.at)}</span></div>`).join('')}</div>` : ''}` : ''}
+      <div class="row between wrap"><span class="small muted">${needFile ? `Add the ${esc(st.fileLabel || 'file link')} first.` : nx ? `Next: ${esc(nx.name)}${nx.kind === 'review' ? ` — with ${esc((nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or '))}` : ''}` : ''}</span><div class="actions">${skip ? `<button class="btn sm" data-action="skip-stage">${ic('arrowRight', 'sm')}${esc(st.skipLabel || 'Skip')}</button>` : ''}<button class="btn sm primary" data-action="submit" ${needFile ? 'disabled' : ''}>${ic(nx && nx.kind === 'review' ? 'send' : 'check', 'sm')}${esc(st.nextLabel || 'Mark ' + st.name + ' done')}</button></div></div>`
+      : `<p class="small muted">${a ? `${esc(a.name)} is working on this.` : 'Waiting for it to be assigned.'}</p>`;
+    return `<div class="action-panel"><div class="row between wrap"><h3>${esc(st.name)}${(r.round || 1) > 1 ? ` · round ${r.round}` : ''}</h3>${lim}</div>
+      <div class="row between wrap"><span class="who">${personHtml(a)}<span class="name">${a ? esc(a.name) + (isMe(a) ? ' (you)' : '') : 'Nobody assigned'}</span></span><span class="small muted">${limitText}${r.assignedAt ? ` · assigned ${fmtRel(r.assignedAt)}` : ''}</span></div>
+      ${next}${manage ? `<div class="divider" style="margin:4px 0"></div>${manage}` : ''}
     </div>`;
   }
   if (st.kind === 'review') {
     const nx = nextStage(st.id); const isFinal = nx && nx.kind === 'end';
     const who = (st.reviewers || []).map((sp) => reviewerLabel(sp, r)); const latest = (r.deliverables || []).filter((d) => d.round === r.round);
     if (!canReview(r, st)) return `<div class="action-panel review"><div class="row between wrap"><h3>Waiting for ${esc(who.join(' or '))} — ${esc(st.name.toLowerCase())}</h3>${lim}</div><p class="small muted">Round ${r.round || 1}. ${latest.length ? plural(latest.length, 'file link') + ' submitted for this round.' : 'No file link on this round.'}</p></div>`;
-    return `<div class="action-panel review"><div class="row between wrap"><h3>${isFinal ? 'Your final approval' : 'Your QC'} · round ${r.round || 1}</h3>${lim}</div>
-      ${isFinal ? `<p class="small muted">Either ${esc(who.join(' or '))} can approve — the first one to act closes the task and records ${esc(assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the')} TAT.</p>` : `<p class="small muted">Check the work against the brief. Approve to send it to ${esc(who.length ? '' : '')}${esc((nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or '))} for final approval, or send it back for rework.</p>`}
+    const backTo = stages(r).find((x) => x.id === st.editsTo);
+    return `<div class="action-panel review"><div class="row between wrap"><h3>${st.uploads ? esc(st.name) : isFinal ? 'Your final approval' : 'Your QC'}${(r.round || 1) > 1 ? ` · round ${r.round}` : ''}</h3>${lim}</div>
+      ${st.uploads ? `<p class="small muted">Check the final file. If it passes, upload it and paste the link — that marks the request <b>${esc(nx.name)}</b> and tells ${esc(firstName(r.requester))}. If it needs changes, send it back to ${esc(backTo ? backTo.name : 'the editor')} with notes (round ${(r.round || 1) + 1}).</p>`
+        : isFinal ? `<p class="small muted">Either ${esc(who.join(' or '))} can approve — the first one to act closes the task and records ${esc(assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the')} TAT.</p>`
+        : `<p class="small muted">Check the work against the brief. Approve to send it to ${esc((nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or '))} for final approval, or send it back for rework.</p>`}
       ${latest.length ? `<div class="stack" style="gap:6px">${latest.map((d) => `<div class="deliverable">${ic('link', 'sm')}<a href="${attr(d.url)}" target="_blank" rel="noopener">${esc(d.label)}</a>${ic('external', 'sm')}</div>`).join('')}</div>` : '<p class="small muted">No file link was added on this round — ask for it in the thread or send it back.</p>'}
-      <form data-form="review" class="stack" style="gap:8px"><textarea class="input" name="note" placeholder="Notes for the team — required when sending it back" rows="3"></textarea><div class="actions"><button class="btn good" data-review="approve" type="button">${ic('check', 'sm')}Approve</button><button class="btn" data-review="edits" type="button">${ic('rotate', 'sm')}${isFinal ? 'Request changes' : 'Send back for rework'}</button></div></form></div>`;
+      <form data-form="review" class="stack" style="gap:8px">${st.uploads ? `<div class="field"><label for="up-link">Link to the uploaded file</label><input class="input sm" id="up-link" name="upload" type="url" placeholder="https://… (YouTube, Drive, the scheduled post)"></div>` : ''}<textarea class="input" name="note" placeholder="Notes for the team — required when sending it back" rows="3"></textarea><div class="actions"><button class="btn good" data-review="approve" type="button">${ic('check', 'sm')}${st.uploads ? 'Uploaded — mark ' + esc(nx.name) : 'Approve'}</button><button class="btn" data-review="edits" type="button">${ic('rotate', 'sm')}${st.uploads || !isFinal ? 'Send back for rework' : 'Request changes'}</button></div></form></div>`;
   }
   return '';
 }
@@ -1123,7 +1228,7 @@ function drawerHtml(r) {
   const visitsTl = (r.visits || []).map((v) => { const s = stageById(v.stage) || { name: v.stage, color: '#888' }; const el = visitElapsed(v, r); const lim = stageLimitMs(s, r, v); const br = visitBreached(v, r); const open = !v.exitedAt;
     const what = s.kind === 'start' ? `<b>${esc(r.requester ? r.requester.name : '')}</b> raised the request` : open ? `In <b>${esc(s.name)}</b>${v.assignee ? ` with ${esc(v.assignee.name)}` : ''} since ${fmtDateTime(v.enteredAt)}` : `<b>${esc(s.name)}</b> ${{ assigned: 'done — briefed and assigned', submitted: 'submitted for QC', approved: 'approved', edits: 'sent back for changes', cancelled: 'cancelled', reopened: 'reopened' }[v.action] || v.action || 'closed'}${v.by ? ` by ${esc(v.by.name)}` : ''}`;
     return `<div class="tl" style="--stage:${attr(themed(s.color))}"><div class="dot ${open ? '' : 'filled'}"></div><div><div class="t-main">${what}${v.round > 1 ? ` <span class="round">R${v.round}</span>` : ''}</div><div class="t-sub"><span>${fmtDateTime(v.enteredAt)}${v.exitedAt && s.kind !== 'start' ? ' → ' + fmtDateTime(v.exitedAt) : ''}</span>${s.kind !== 'start' && s.kind !== 'end' ? `<span>${s.slaFrom === 'task' ? 'TAT' : 'time'} ${fmtDur(el)}${lim ? ` / ${fmtDur(lim)}` : ''}</span>${lim ? `<span class="${br ? 'crit' : 'good'}">${br ? 'over' : 'within limit'}</span>` : ''}` : ''}</div></div></div>`; }).join('');
-  return `<div class="drawer-head"><div class="grow"><div class="row wrap" style="gap:8px"><span class="mono small muted">${esc(r.id)}</span>${stageChip(st)}${teamChip(r.team)}${r.status === 'cancelled' ? '<span class="chip">Cancelled</span>' : ''}${isBreachedNow(r) ? `<span class="breach-flag pulse">${ic('alert')}over limit</span>` : ''}${r.round > 1 ? `<span class="round">Round ${r.round}</span>` : ''}${r.sample ? '<span class="chip">sample</span>' : ''}</div><h2>${esc(r.title)}</h2><div class="row wrap" style="gap:10px;margin-top:8px"><span class="chip outline">${esc(r.type)}</span>${prioHtml(r.priority)}<span class="small ${due.cls}">${ic('calendar', 'sm')} ${esc(due.text)}</span><span class="who" title="Raised by">${personHtml(r.requester, 'sm')}<span class="name small">${esc(r.requester ? r.requester.name : '')}</span></span>${assigneeOf(r) ? `<span class="who" title="Assignee">${personHtml(assigneeOf(r), 'sm')}<span class="name small">${esc(assigneeOf(r).name)} · TAT ${tatLabel(r)}</span></span>` : ''}</div></div>
+  return `<div class="drawer-head"><div class="grow"><div class="row wrap" style="gap:8px"><span class="mono small muted">${esc(r.id)}</span>${stageChip(st)}${teamChip(r.team)}${r.status === 'cancelled' ? '<span class="chip">Cancelled</span>' : ''}${isBreachedNow(r) ? `<span class="breach-flag pulse">${ic('alert')}over limit</span>` : ''}${r.round > 1 ? `<span class="round">Round ${r.round}</span>` : ''}${r.sample ? '<span class="chip">sample</span>' : ''}</div><h2>${esc(r.title)}</h2><div class="row wrap" style="gap:10px;margin-top:8px"><span class="chip outline">${esc(r.type)}</span>${prioHtml(r.priority)}<span class="small ${due.cls}">${ic('calendar', 'sm')} ${esc(due.text)}</span><span class="who" title="Raised by">${personHtml(r.requester, 'sm')}<span class="name small">${esc(r.requester ? r.requester.name : '')}</span></span>${assigneeOf(r) ? `<span class="who" title="Assignee">${personHtml(assigneeOf(r), 'sm')}<span class="name small">${esc(assigneeOf(r).name)}${(workStage(r) || {}).slaFrom === 'task' ? ` · TAT ${tatLabel(r)}` : ''}</span></span>` : ''}</div></div>
     <div class="row">${canEditRequest(r) ? `<button class="btn ghost sm icon-only" data-action="edit" data-id="${attr(r.id)}" aria-label="Edit request">${ic('edit', 'sm')}</button>` : ''}<button class="btn ghost sm icon-only" data-action="close-drawer" aria-label="Close">${ic('x')}</button></div></div>
   <div class="drawer-body">
     ${stepperHtml(r)}
@@ -1198,7 +1303,7 @@ function trySignIn(email) {
   email = lower(email); if (!email) return;
   const m = S.members.find((x) => sameEmail(x.email, email));
   if (m && m.active === false) { S.gateError = 'This account is inactive — ask an admin to reactivate it.'; return renderAll(false); }
-  if (m) { localStorage.setItem(LS.me, email); S.me = m; S.gateError = ''; return renderAll(true); }
+  if (m) { localStorage.setItem(LS.me, email); S.me = m; S.gateError = ''; readRoute(); return renderAll(true); }
   if (sameEmail(email, APP.ownerEmail)) { const doc = { email, name: APP.ownerName, roles: ['admin', 'requester'], active: true }; saveMember(doc, 'quiet').then(() => { localStorage.setItem(LS.me, email); S.me = S.members.find((x) => sameEmail(x.email, email)); renderAll(true); }); return; }
   const domains = (S.settings.allowedDomains || []).map(lower);
   if (domains.includes(emailDomain(email))) { S.gatePending = email; S.gateError = ''; return renderAll(false); }
@@ -1314,11 +1419,11 @@ function tipFrom(el, x, y) {
 
 /* ---------------- CSV export ---------------- */
 function csvExport() {
-  const sts = stages().filter((s) => s.kind !== 'start' && s.kind !== 'end');
+  const sts = allStages().filter((s) => s.kind !== 'start' && s.kind !== 'end');
   const head = ['Task ID', 'Title', 'Type', 'Team', 'Priority', 'Status', 'Stage', 'Round', 'Requester', 'Assignee', 'Raised', 'Assigned', 'Due', 'Approved', 'Approved by', 'TAT target (h)', 'Production TAT (h)', 'TAT met', 'End-to-end (h)', ...sts.flatMap((s) => [`${s.name} time (h)`, `${s.name} limit (h)`, `${s.name} result`])];
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const iso = (ts) => ts ? new Date(ts).toISOString() : '';
-  const rows = S.requests.map((r) => { const a = assigneeOf(r); const res = r.result; return [r.id, r.title, r.type, teamName(r.team), r.priority, r.status, (stageById(r.stage) || {}).name, r.round || 1, r.requester ? r.requester.name : '', a ? a.name : '', iso(r.createdAt), iso(r.assignedAt), r.dueDate || '', iso(r.completedAt), res && res.approvedBy ? res.approvedBy.name : '', r.tatHours || '', res ? res.actualHours : (productionTat(r) / H).toFixed(1), res ? (res.met ? 'yes' : 'no') : '', (totalTat(r) / H).toFixed(1), ...sts.flatMap((s) => { const vs = (r.visits || []).filter((v) => v.stage === s.id); if (!vs.length) return ['', stageLimitMs(s, r) / H || '', '']; const t = stageTat(r, s.id); const lim = stageLimitMs(s, r, vs[0]); return [(t / H).toFixed(1), lim / H || '', vs.some((v) => visitBreached(v, r)) ? 'over' : lim ? 'within' : 'no limit']; })]; });
+  const rows = S.requests.map((r) => { const a = assigneeOf(r); const res = r.result; return [r.id, r.title, r.type, teamName(r.team), r.priority, r.status, (currentStage(r) || {}).name, r.round || 1, r.requester ? r.requester.name : '', a ? a.name : '', iso(r.createdAt), iso(r.assignedAt), r.dueDate || '', iso(r.completedAt), res && res.approvedBy ? res.approvedBy.name : '', r.tatHours || '', res ? res.actualHours : (productionTat(r) / H).toFixed(1), res ? (res.met ? 'yes' : 'no') : '', (totalTat(r) / H).toFixed(1), ...sts.flatMap((s) => { const vs = (r.visits || []).filter((v) => v.stage === s.id); if (!vs.length) return ['', stageLimitMs(s, r) / H || '', '']; const t = stageTat(r, s.id); const lim = stageLimitMs(s, r, vs[0]); return [(t / H).toFixed(1), lim / H || '', vs.some((v) => visitBreached(v, r)) ? 'over' : lim ? 'within' : 'no limit']; })]; });
   return [head, ...rows].map((r) => r.map(q).join(',')).join('\n');
 }
 async function doExport() {
@@ -1354,7 +1459,7 @@ document.addEventListener('click', async (e) => {
   const modeEl = e.target.closest('[data-mode]'); if (modeEl) { S.boardMode = modeEl.dataset.mode; localStorage.setItem(LS.boardMode, S.boardMode); renderPage(false); return; }
   const tog = e.target.closest('[data-toggle]'); if (tog) { S.filters[tog.dataset.toggle] = !S.filters[tog.dataset.toggle]; renderPage(false); return; }
   const sortEl = e.target.closest('[data-sort]'); if (sortEl) { const k = sortEl.dataset.sort; if (S.sort.key === k) S.sort.dir = S.sort.dir === 'asc' ? 'desc' : 'asc'; else S.sort = { key: k, dir: ['title', 'assignee', 'type'].includes(k) ? 'asc' : 'desc' }; renderPage(false); return; }
-  const revEl = e.target.closest('[data-review]'); if (revEl) { const form = revEl.closest('form'); const note = form.querySelector('[name=note]').value.trim(); const id = S.drawer; const r = getReq(id); const st = stageById(r.stage); const nx = nextStage(r.stage); const isFinal = nx && nx.kind === 'end'; if (revEl.dataset.review === 'approve') { if (!(await confirmBox({ title: isFinal ? 'Give final approval?' : `Pass ${st.name}?`, sub: isFinal ? `The task closes and ${assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the'} production TAT is recorded.` : `It goes to ${(nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or ')} for final approval.`, confirm: 'Approve' }))) return; await actApprove(id, note); } else { if (!note) { toast('Tell the team what to change first.', 'crit'); form.querySelector('[name=note]').focus(); return; } await actRequestEdits(id, note); } return; }
+  const revEl = e.target.closest('[data-review]'); if (revEl) { const form = revEl.closest('form'); const note = form.querySelector('[name=note]').value.trim(); const upEl = form.querySelector('[name=upload]'); const upload = upEl ? upEl.value.trim() : ''; const id = S.drawer; const r = getReq(id); const st = currentStage(r); const nx = nextStage(st.id, r); const isFinal = nx && nx.kind === 'end'; if (revEl.dataset.review === 'approve') { if (st.uploads && !isUrl(upload)) { toast('Paste the link to the uploaded file first.', 'crit'); if (upEl) upEl.focus(); return; } if (!(await confirmBox({ title: isFinal ? (st.uploads ? `Mark ${nx.name}?` : 'Give final approval?') : `Pass ${st.name}?`, sub: isFinal ? `The task closes, ${esc(firstName(r.requester))} is notified and ${assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the'} turnaround is recorded.` : `It goes to ${(nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or ')} for final approval.`, confirm: isFinal && st.uploads ? 'Mark delivered' : 'Approve' }))) return; await actApprove(id, note, upload); } else { if (!note) { toast('Tell the team what to change first.', 'crit'); form.querySelector('[name=note]').focus(); return; } await actRequestEdits(id, note); } return; }
   const act = e.target.closest('[data-action]'); if (!act) return;
   if (act.classList.contains('overlay') || act.classList.contains('modal-wrap')) { if (e.target !== act) return; }
   const a = act.dataset.action; const id = act.dataset.id || S.drawer;
@@ -1369,6 +1474,7 @@ document.addEventListener('click', async (e) => {
     case 'save-brief': { const form = act.closest('form'); const f = formData(form); const tat = readTat(form); if (!tat) return; await actSaveBrief(id, { brief: (f.brief || '').trim(), team: f.team, tat }); break; }
     case 'set-tat': { const form = act.closest('form'); const tat = readTat(form); if (!tat) return; await actSetTat(id, tat); break; }
     case 'submit': await actSubmit(id); break;
+    case 'skip-stage': await actSubmit(id, { skip: true }); break;
     case 'reopen': if (await confirmBox({ title: 'Reopen this task?', sub: 'It goes back into production as a new round.', confirm: 'Reopen' })) await actReopen(id); break;
     case 'cancel': { const note = await noteBox({ kind: 'cancel', title: 'Cancel this request?', sub: 'It leaves the board but stays in the list for reporting.', label: 'Reason (optional)', required: false, confirm: 'Cancel request', danger: true }); if (note === false) return; await actCancel(id, note); break; }
     case 'delete': if (await confirmBox({ title: 'Delete this request permanently?', sub: 'This removes it from every report. Prefer Cancel unless it was a mistake.', confirm: 'Delete', danger: true })) { await actDelete(id); closeDrawer(); } break;
@@ -1377,11 +1483,11 @@ document.addEventListener('click', async (e) => {
     case 'remove-member': { const m = S.members.find((x) => x.id === id); if (await confirmBox({ title: `Remove ${m ? m.name : 'this teammate'}?`, sub: 'They can no longer sign in. Their past work stays on the tasks.', confirm: 'Remove', danger: true })) await removeMember(id); break; }
     case 'add-role': openModal({ type: 'role' }); break;
     case 'remove-role': { const s = clone(S.settings); s.roles = roles().filter((r) => r.id !== id); await saveSettings(s, 'Role removed'); S.settingsDraft = null; break; }
-    case 'add-stage': { const f = S.flowDraft; const n = f.stages.length; const name = 'New stage'; f.stages.splice(n - 1, 0, { id: slug(name) + '-' + uid().slice(0, 4), name, role: 'coordinator', slaHours: 24, kind: 'review', reviewers: ['role:coordinator'], editsTo: (f.stages.find((x) => x.kind === 'work') || {}).id || '', color: '#0E9384' }); renderPage(false); break; }
-    case 'stage-up': case 'stage-down': { const f = S.flowDraft; const i = Number(act.dataset.i); const j = a === 'stage-up' ? i - 1 : i + 1; [f.stages[i], f.stages[j]] = [f.stages[j], f.stages[i]]; renderPage(false); break; }
-    case 'stage-del': { const f = S.flowDraft; const s = f.stages[Number(act.dataset.i)]; if (await confirmBox({ title: `Remove the ${s.name} stage?`, sub: 'Past timing data for this stage stays on old tasks.', confirm: 'Remove', danger: true })) { f.stages.splice(Number(act.dataset.i), 1); f.stages.forEach((x) => { if (x.editsTo === s.id) x.editsTo = (f.stages.find((y) => y.kind === 'work') || {}).id || ''; }); renderPage(false); } break; }
+    case 'add-stage': { const t = act.dataset.team; const sts = S.flowDraft.teams[t]; const name = 'New stage'; const work = sts.find((x) => x.kind === 'work'); sts.splice(sts.length - 1, 0, { id: slug(name) + '-' + uid().slice(0, 4), name, role: t === 'video' ? 'video' : 'team', slaHours: 24, kind: 'work', phase: 'work', needsFile: true, color: '#0E9384' }); renderPage(false); break; }
+    case 'stage-up': case 'stage-down': { const sts = S.flowDraft.teams[act.dataset.team]; const i = Number(act.dataset.i); const j = a === 'stage-up' ? i - 1 : i + 1; [sts[i], sts[j]] = [sts[j], sts[i]]; renderPage(false); break; }
+    case 'stage-del': { const sts = S.flowDraft.teams[act.dataset.team]; const s = sts[Number(act.dataset.i)]; if (await confirmBox({ title: `Remove the ${s.name} stage?`, sub: 'Past timing data for this stage stays on old tasks.', confirm: 'Remove', danger: true })) { sts.splice(Number(act.dataset.i), 1); sts.forEach((x) => { if (x.editsTo === s.id) x.editsTo = (sts.find((y) => y.kind === 'work') || {}).id || ''; if (x.skipTo === s.id) delete x.skipTo; }); renderPage(false); } break; }
     case 'reset-flow': S.flowDraft = clone(S.flow); renderPage(false); toast('Changes discarded', 'info'); break;
-    case 'save-flow': { const f = clone(S.flowDraft); const err = validateFlow(f); if (err) return toast(err, 'crit'); await saveFlow(f); S.flowDraft = clone(S.flow); renderPage(false); break; }
+    case 'save-flow': { const f = clone(S.flowDraft); for (const t of TEAM_IDS) { const err = validateFlow(f.teams[t], teamName(t)); if (err) return toast(err, 'crit'); } await saveFlow(f); S.flowDraft = clone(S.flow); renderPage(false); break; }
     case 'toggle-wh': S.settingsDraft.workHours.enabled = !S.settingsDraft.workHours.enabled; renderPage(false); break;
     case 'toggle-notify': S.settingsDraft.notifications = { ...(S.settingsDraft.notifications || {}), enabled: !(S.settingsDraft.notifications && S.settingsDraft.notifications.enabled !== false) }; renderPage(false); break;
     case 'add-type': S.settingsDraft.types.push({ id: 'type-' + uid().slice(0, 5), name: '', team: 'design', tatHours: 72, from: '', goesTo: '' }); renderPage(false); setTimeout(() => { const last = $$('[data-ty="name"]').pop(); if (last) last.focus(); }, 0); break;
@@ -1393,14 +1499,25 @@ document.addEventListener('click', async (e) => {
     case 'clear-filters': S.filters = { type: '', prio: '', team: '', mine: false, breached: false, stage: '', person: '', dateField: S.filters.dateField, from: '', to: '', preset: '' }; S.q = ''; renderPage(false); break;
     case 'export': await doExport(); break;
     case 'remove-samples': if (await confirmBox({ title: 'Remove all sample requests?', sub: 'Sample tasks are deleted for everyone. The team roster stays.', confirm: 'Remove samples', danger: true })) await removeSamples(); break;
-    case 'reset-demo': if (S.store.reset && await confirmBox({ title: 'Reset the demo workspace?', sub: 'Everything in this browser goes back to the sample state.', confirm: 'Reset', danger: true })) { S.store.reset(); S.flow = clone(DEFAULT_FLOW); S.settings = clone(DEFAULT_SETTINGS); S.flowDraft = null; S.settingsDraft = null; renderAll(true); } break;
+    case 'reset-demo': if (S.store.reset && await confirmBox({ title: 'Reset the demo workspace?', sub: 'Everything in this browser goes back to the sample state.', confirm: 'Reset', danger: true })) { S.store.reset(); S.flow = normalizeFlow(clone(DEFAULT_FLOW)); S.settings = clone(DEFAULT_SETTINGS); S.flowDraft = null; S.settingsDraft = null; renderAll(true); } break;
   }
 });
-function validateFlow(f) {
-  if (f.stages.length < 3) return 'A flow needs at least a start, one stage and an end.';
-  if (f.stages[0].kind !== 'start' || f.stages[f.stages.length - 1].kind !== 'end') return 'The first stage must be the start and the last must be the end.';
-  if (!f.stages.some((s) => s.kind === 'work')) return 'Add at least one work stage.';
-  const ids = new Set(); for (const s of f.stages) { s.name = String(s.name || '').trim(); if (!s.name) return 'Every stage needs a name.'; if (ids.has(s.id)) return 'Duplicate stage id.'; ids.add(s.id); s.slaHours = Math.max(0, Number(s.slaHours) || 0); if (s.kind === 'review') { if (!(s.reviewers || []).length) return `${s.name} needs at least one approver.`; if (!f.stages.some((x) => x.id === s.editsTo && x.kind === 'work')) s.editsTo = f.stages.find((x) => x.kind === 'work').id; } if ((s.kind === 'triage' || s.kind === 'work') && !s.role) return `${s.name} needs an owner.`; if (s.kind === 'work' && s.slaFrom !== 'task') delete s.slaFrom; }
+function validateFlow(sts, label) {
+  const where = label ? `${label}: ` : '';
+  if (!sts || sts.length < 3) return `${where}a flow needs at least a start, one stage and an end.`;
+  if (sts[0].kind !== 'start' || sts[sts.length - 1].kind !== 'end') return `${where}the first stage must be the start and the last must be the end.`;
+  if (!sts.some((s) => s.kind === 'work')) return `${where}add at least one work stage.`;
+  const ids = new Set();
+  for (const s of sts) {
+    s.name = String(s.name || '').trim(); if (!s.name) return `${where}every stage needs a name.`;
+    if (ids.has(s.id)) return `${where}duplicate stage id.`; ids.add(s.id);
+    s.slaHours = Math.max(0, Number(s.slaHours) || 0);
+    s.phase = s.phase || (s.kind === 'start' ? 'intake' : s.kind === 'triage' ? 'brief' : s.kind === 'work' ? 'work' : s.kind === 'end' ? 'done' : 'qc');
+    if (s.kind === 'review') { if (!(s.reviewers || []).length) return `${where}${s.name} needs at least one approver.`; if (!sts.some((x) => x.id === s.editsTo && x.kind === 'work')) s.editsTo = sts.find((x) => x.kind === 'work').id; }
+    if ((s.kind === 'triage' || s.kind === 'work') && !s.role) return `${where}${s.name} needs an owner.`;
+    if (s.kind === 'work' && s.slaFrom !== 'task') delete s.slaFrom;
+    if (s.skipTo && !sts.some((x) => x.id === s.skipTo)) delete s.skipTo;
+  }
   return null;
 }
 document.addEventListener('submit', async (e) => {
@@ -1412,8 +1529,8 @@ document.addEventListener('submit', async (e) => {
     case 'bootstrap': { const doc = { email: lower(f.email), name: f.name.trim(), roles: ['admin', 'requester'], active: true }; await saveMember(doc, true); localStorage.setItem(LS.me, doc.email); S.me = S.members.find((x) => sameEmail(x.email, doc.email)); S.bootstrap = false; renderAll(true); break; }
     case 'new': { const d = parseRequestForm(form); if (!d) return; form.querySelector('[type=submit]').disabled = true; closeModal(); const r = await createRequest(d); openRequest(r.id); break; }
     case 'edit': { const d = parseRequestForm(form); if (!d) return; closeModal(); await actEdit(form.dataset.id, d); break; }
-    case 'triage': { const tat = readTat(form); if (!tat) return; await actAssign(S.drawer, { brief: (f.brief || '').trim(), team: f.team, email: f.email, tat }); break; }
-    case 'reassign': if (!f.email) return toast('Choose who to reassign to.', 'info'); await actReassign(S.drawer, f.email); break;
+    case 'triage': { const r0 = getReq(S.drawer); const w0 = workStage(r0); const needTat = !!(w0 && w0.slaFrom === 'task'); const tat = needTat ? readTat(form) : null; if (needTat && !tat) return; await actAssign(S.drawer, { brief: (f.brief || '').trim(), team: f.team, email: f.email, tat, noShoot: !!f.noShoot }); break; }
+    case 'reassign': if (!f.email) return toast('Choose who to reassign to.', 'info'); await actReassign(S.drawer, f.email, f.scope || 'stage'); break;
     case 'member': { const rolesSel = [].concat(f.roles || []); if (!rolesSel.length) return toast('Pick at least one role.', 'crit'); const existing = form.dataset.id ? S.members.find((x) => x.id === form.dataset.id) : null; const newEmail = lower(f.email); if (S.members.some((x) => sameEmail(x.email, newEmail) && (!existing || x.id !== existing.id))) return toast('That email is already on the team.', 'crit'); const wasAdminSelf = existing && isMe(existing) && hasRole(existing, 'admin'); if (wasAdminSelf && !rolesSel.includes('admin') && !sameEmail(existing.email, APP.ownerEmail)) return toast('You cannot remove your own admin role.', 'crit'); closeModal(); if (existing && !sameEmail(existing.email, newEmail)) { await removeMemberQuiet(existing.id); } await saveMember({ ...(existing || {}), email: newEmail, name: f.name, roles: rolesSel, active: existing ? !!f.active : true, emailUnconfirmed: undefined }, !existing); if (existing && isMe(existing)) { const me = S.members.find((x) => sameEmail(x.email, newEmail)); if (me) { S.me = me; localStorage.setItem(LS.me, newEmail); } } renderAll(false); break; }
     case 'role': { const s = clone(S.settings); s.roles = roles().slice(); const rid = slug(f.name); if (s.roles.some((r) => r.id === rid)) return toast('A role with that name already exists.', 'crit'); s.roles.push({ id: rid, name: f.name.trim(), color: f.color || '#0E9384', desc: (f.desc || '').trim() }); closeModal(); await saveSettings(s, 'Role added'); S.settingsDraft = null; break; }
     case 'note': { const m = S.modal; closeModal(); if (m && m._res) m._res(f.text.trim()); break; }
@@ -1429,7 +1546,7 @@ document.addEventListener('input', (e) => {
   if (t.id === 'q') { S.q = t.value; clearTimeout(S._qT); S._qT = setTimeout(() => renderPage(false), 120); return; }
   if (t.name === 'tatHours' || t.name === 'tatDeadline') { const pane = t.closest('[data-tat-pane]'); const hint = pane && pane.querySelector('[data-tat-hint]'); if (!hint) return; if (t.name === 'tatHours') { const h = Number(t.value); hint.textContent = h > 0 && h % 24 === 0 ? '= ' + fmtTat(h) : (h > 24 ? '= ' + (h / 24).toFixed(1) + ' days' : ''); } else { const ts = t.value ? new Date(t.value).getTime() : NaN; hint.textContent = ts && !isNaN(ts) ? (ts > now() ? '= ' + fmtDur(ts - now()) + ' from now' : 'in the past') : ''; } return; }
   if (t.dataset.triageTeam !== undefined) { const team = t.value; const who = $('[data-triage-who]'); if (who) { const eligible = membersWithRole(team); who.innerHTML = `<option value="">${eligible.length ? 'Choose…' : 'No one on this team yet'}</option>` + eligible.map((m) => `<option value="${attr(m.email)}">${esc(m.name)}</option>`).join(''); } return; }
-  if (t.dataset.sf !== undefined && S.flowDraft) { const row = t.closest('.stage-editor'); const s = S.flowDraft.stages[Number(row.dataset.i)]; const k = t.dataset.sf; if (k === 'needsFile') s.needsFile = t.checked; else if (k === 'reviewer') { const set = new Set(s.reviewers || []); if (t.checked) set.add(t.value); else set.delete(t.value); s.reviewers = [...set]; } else if (k === 'slaHours') s.slaHours = Math.max(0, Number(t.value) || 0); else s[k] = t.value; if (k === 'kind' || k === 'slaFrom') { if (s.kind === 'review') { s.reviewers ||= ['role:coordinator']; if (!s.editsTo) s.editsTo = (S.flowDraft.stages.find((x) => x.kind === 'work') || {}).id || ''; } if (s.kind === 'work' && !s.role) s.role = 'team'; if (s.kind === 'triage' && (!s.role || s.role === 'team')) s.role = 'coordinator'; renderPage(false); return; } if (['color', 'name', 'slaHours', 'role', 'reviewer', 'editsTo'].includes(k)) { const fd = $('.flow-diagram'); if (fd) fd.outerHTML = flowDiagram(S.flowDraft); } return; }
+  if (t.dataset.sf !== undefined && S.flowDraft) { const row = t.closest('.stage-editor'); const sts = S.flowDraft.teams[row.dataset.team]; const s = sts[Number(row.dataset.i)]; const k = t.dataset.sf; if (k === 'needsFile') s.needsFile = t.checked; else if (k === 'reviewer') { const set = new Set(s.reviewers || []); if (t.checked) set.add(t.value); else set.delete(t.value); s.reviewers = [...set]; } else if (k === 'slaHours') s.slaHours = Math.max(0, Number(t.value) || 0); else s[k] = t.value; if (k === 'kind' || k === 'slaFrom') { if (s.kind === 'review') { s.reviewers ||= ['role:coordinator']; if (!s.editsTo) s.editsTo = (sts.find((x) => x.kind === 'work') || {}).id || ''; } if (s.kind === 'work' && !s.role) s.role = row.dataset.team === 'video' ? 'video' : 'team'; if (s.kind === 'triage' && (!s.role || s.role === 'team')) s.role = row.dataset.team === 'video' ? 'videolead' : 'coordinator'; renderPage(false); return; } if (['color', 'name', 'slaHours', 'role', 'reviewer', 'editsTo'].includes(k)) renderPage(false); return; }
   if (t.dataset.ty !== undefined && S.settingsDraft) { const ty = S.settingsDraft.types[Number(t.dataset.i)]; if (!ty) return; const k = t.dataset.ty; if (k === 'tatHoursIn') ty.tatHours = Math.max(0, Number(t.value) || 0); else ty[k] = t.value; if (k === 'name' && !ty._idLocked && String(ty.id || '').startsWith('type-')) { /* keep generated id */ } return; }
   if (t.dataset.ss !== undefined && S.settingsDraft) { const k = t.dataset.ss; if (k === 'start' || k === 'end') S.settingsDraft.workHours[k] = Number(t.value); else if (k === 'slaWarnAt') { S.settingsDraft.slaWarnAt = Number(t.value) / 100; const p = $('#warn-pct'); if (p) p.textContent = t.value + '%'; } else S.settingsDraft[k] = t.value; return; }
   if (t.dataset.day !== undefined && S.settingsDraft) { const d = Number(t.dataset.day); const days = S.settingsDraft.workHours.days; if (t.checked && !days.includes(d)) days.push(d); if (!t.checked) S.settingsDraft.workHours.days = days.filter((x) => x !== d); return; }
@@ -1458,6 +1575,17 @@ function readRoute() {
 window.addEventListener('hashchange', () => { const before = S.route.view; readRoute(); if (S.route.view !== before) { S.drawer = null; window.scrollTo({ top: 0 }); } renderAll(S.route.view !== before); });
 
 /* ---------------- boot ---------------- */
+function normalizeFlow(doc) {
+  const f = { version: (doc && doc.version) || 1, updatedAt: doc && doc.updatedAt, updatedBy: doc && doc.updatedBy, teams: {} };
+  const src = (doc && doc.teams) || {};
+  TEAM_IDS.forEach((t) => {
+    let sts = Array.isArray(src[t]) ? src[t] : null;
+    if (!sts && t === 'design' && Array.isArray(doc && doc.stages) && doc.stages.length) sts = doc.stages;   // pre-teams document
+    f.teams[t] = (sts && sts.length && sts.some((s) => s.kind === 'triage')) ? clone(sts) : clone(DEFAULT_FLOW.teams[t]);
+    f.teams[t].forEach((s) => { s.phase = s.phase || (s.kind === 'start' ? 'intake' : s.kind === 'triage' ? 'brief' : s.kind === 'work' ? 'work' : s.kind === 'end' ? 'done' : 'qc'); });
+  });
+  return f;
+}
 function normalizeSettings(settings) {
   const s = { ...clone(DEFAULT_SETTINGS), ...(settings || {}) };
   s.workHours = { ...DEFAULT_SETTINGS.workHours, ...((settings && settings.workHours) || {}) };
@@ -1473,7 +1601,7 @@ function subscribeAll() {
   S.store.subscribe('members', (rows) => { S.members = rows; S.loaded.members = true; if (S.authMode === 'clerk') { resolveIdentity().then(() => renderAll(false)); return; } if (S.me) { const fresh = rows.find((m) => sameEmail(m.email, S.me.email)); if (!fresh || fresh.active === false) { if (!sameEmail(S.me.email, APP.ownerEmail)) { S.me = null; localStorage.removeItem(LS.me); toast('Your access was changed by an admin.', 'info'); } } else S.me = fresh; } else if (S.loaded.members) { const saved = localStorage.getItem(LS.me); if (saved) { const m = rows.find((x) => sameEmail(x.email, saved) && x.active !== false); if (m) S.me = m; } } S.bootstrap = S.loaded.members && rows.length === 0; renderAll(false); }, onErr);
   S.store.subscribe('requests', (rows) => { S.requests = rows.map((r) => ({ visits: [], thread: [], deliverables: [], assignees: {}, refs: [], ...r })).sort((a, b) => (a.num || 0) - (b.num || 0)); S.loaded.requests = true; renderAll(false); }, onErr);
   S.store.subscribe('roster', (rows) => { S.roster = rows.find((r) => r.id === 'weekly') || null; if (S.route.view === 'roster') renderPage(false); }, () => {});
-  S.store.subscribe('config', (rows) => { const flow = rows.find((r) => r.id === 'flow'); const settings = rows.find((r) => r.id === 'settings'); if (flow && Array.isArray(flow.stages) && flow.stages.length && flow.stages.some((s) => s.kind === 'triage')) S.flow = flow; S.settings = normalizeSettings(settings); S.loaded.config = true; renderAll(false); }, onErr);
+  S.store.subscribe('config', (rows) => { const flow = rows.find((r) => r.id === 'flow'); const settings = rows.find((r) => r.id === 'settings'); S.flow = normalizeFlow(flow); S.settings = normalizeSettings(settings); S.loaded.config = true; renderAll(false); }, onErr);
 }
 /* ---------------- Clerk (real identity on the website) ---------------- */
 const pageUrl = () => location.href.split('#')[0];
@@ -1494,7 +1622,9 @@ async function resolveIdentity() {
   if (m) {
     if (m.active === false) { S.me = null; S.gateError = 'Your account is inactive — ask an admin to reactivate it.'; return; }
     S.gateError = '';
+    const wasOut = !S.me;
     S.me = { ...m, authId: id.authId, image: id.image };
+    if (wasOut) readRoute();
     if (!registering && (m.authId !== id.authId || (m.emailUnconfirmed))) { registering = true; try { await saveMember({ ...m, authId: id.authId, emailUnconfirmed: undefined }, 'quiet'); } finally { registering = false; } }
     return;
   }

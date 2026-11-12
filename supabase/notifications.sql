@@ -92,6 +92,8 @@ create or replace function public.notify_request_change() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
   cfg          public.mailer_config%rowtype;
+  triage_role  text;
+  spec         text;
   settings     jsonb;
   stages       jsonb;
   work_stage   text;
@@ -120,14 +122,26 @@ begin
   select data into settings from public.docs where collection = 'config' and id = 'settings';
   if coalesce((settings -> 'notifications' ->> 'enabled')::boolean, true) = false then return new; end if;
 
-  select data -> 'stages' into stages from public.docs where collection = 'config' and id = 'flow';
+  -- the flow of this request's team (falls back to the pre-teams document shape)
+  select coalesce(d.data -> 'teams' -> coalesce(new.data ->> 'team', 'design'), d.data -> 'teams' -> 'design', d.data -> 'stages', '[]'::jsonb)
+    into stages from public.docs d where d.collection = 'config' and d.id = 'flow';
   stages := coalesce(stages, '[]'::jsonb);
+  select s ->> 'role' into triage_role from jsonb_array_elements(stages) s where s ->> 'kind' = 'triage' limit 1;
+  triage_role := coalesce(triage_role, 'coordinator');
   new_stage := new.data ->> 'stage';
   old_stage := case when tg_op = 'UPDATE' then old.data ->> 'stage' else null end;
   select s ->> 'kind', s ->> 'name' into new_kind, stage_name from jsonb_array_elements(stages) s where s ->> 'id' = new_stage;
   select s ->> 'kind' into old_kind from jsonb_array_elements(stages) s where s ->> 'id' = old_stage;
   select s ->> 'id' into work_stage from jsonb_array_elements(stages) s where s ->> 'kind' = 'work' limit 1;
-  assignee  := new.data -> 'assignees' -> coalesce(work_stage, 'production');
+  -- who is doing the work: the current stage's person, else the last work stage that has one
+  assignee := new.data -> 'assignees' -> new_stage;
+  if assignee is null then
+    select x.a into assignee from (
+      select new.data -> 'assignees' -> (e.value ->> 'id') as a, e.ord
+      from jsonb_array_elements(stages) with ordinality as e(value, ord)
+      where e.value ->> 'kind' = 'work' and (new.data -> 'assignees') ? (e.value ->> 'id')
+      order by e.ord desc limit 1) x;
+  end if;
   requester := new.data -> 'requester';
 
   -- which event is this?
@@ -164,10 +178,24 @@ begin
   if last_msg is not null and (last_msg ->> 'kind') in ('edit', 'approval') then note := last_msg ->> 'text'; end if;
 
   -- recipients by role (the person who acted is never emailed about their own action)
-  if ev in ('raised', 'submitted', 'approved') then
+  -- the lead of this flow (coordinator for design, video lead for video)
+  if ev in ('raised', 'approved') then
     for m in select d.data ->> 'email' as email, d.data ->> 'name' as name from public.docs d
-             where d.collection = 'members' and (d.data -> 'roles') ? 'coordinator' and coalesce((d.data ->> 'active')::boolean, true) loop
-      recips := recips || jsonb_build_object('email', m.email, 'name', m.name, 'role', 'coordinator');
+             where d.collection = 'members' and (d.data -> 'roles') ? triage_role and coalesce((d.data ->> 'active')::boolean, true) loop
+      recips := recips || jsonb_build_object('email', m.email, 'name', m.name, 'role', 'lead');
+    end loop;
+  end if;
+  -- work handed to a review stage: whoever may pass that stage
+  if ev = 'submitted' then
+    for spec in select jsonb_array_elements_text(coalesce((select s -> 'reviewers' from jsonb_array_elements(stages) s where s ->> 'id' = new_stage), '[]'::jsonb)) loop
+      if spec = 'requester' then
+        if coalesce(requester ->> 'email', '') <> '' then recips := recips || jsonb_build_object('email', requester ->> 'email', 'name', requester ->> 'name', 'role', 'requester'); end if;
+      elsif spec like 'role:%' then
+        for m in select d.data ->> 'email' as email, d.data ->> 'name' as name from public.docs d
+                 where d.collection = 'members' and (d.data -> 'roles') ? substring(spec from 6) and coalesce((d.data ->> 'active')::boolean, true) loop
+          recips := recips || jsonb_build_object('email', m.email, 'name', m.name, 'role', 'reviewer');
+        end loop;
+      end if;
     end loop;
   end if;
   if ev = 'qc_passed' then

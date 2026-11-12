@@ -1,20 +1,28 @@
 # Creative Request Ops — Brick&Bolt
 
-A workflow app that moves the branding team's requests through a relay:
+A workflow app that moves the branding team's requests through their team's flow.
+
+**Graphic design**
 
 ```
 Requested → Brief & assign → In production → QC → Final approval → Approved
- (anyone)    (coordinator)   (design/video)  (coord.)  (requester or admin)
+ (anyone)    (coordinator)     (designer)   (coord.)  (requester or admin)
 ```
 
-1. **Anyone with a @bricknbolt.com email** signs in and raises a request (type, priority, needed-by, details).
-2. **Every request goes to the coordinator (Sakshi)**, who confirms the details with the requester, writes the creative brief, picks the graphic-design or video person, and **sets the TAT** for that task. The task ID (e.g. `BB-0012`) is minted at submission.
-3. **The assignee** sees the task in *My queue* with its TAT deadline, attaches the final file link and submits it.
-4. **QC by the coordinator** — approve, or send back for rework (a new round).
-5. **Final approval** — the requester *or* an admin (Pawan), whichever acts first. Changes go back to production.
-6. On final approval the **assignee's production TAT** (actual vs target, rounds, on-time) is stored on the task and rolls up into the *Team turnaround* table.
+**Video editing**
 
-Every stage is timed against its limit (coordinator SLA 24h, QC 24h, final approval 24h, production = per-task TAT); breaches are flagged on cards, columns, the queue and the dashboard. Request types and their default TATs come from the team's tracker and are editable in Settings; the flow itself is editable by admins.
+```
+Requested → Brief received → Assigned → Shoot → First cut → Final edit → QC & upload → Delivered
+ (anyone)     (video lead)   (editor, who stays on by default through the three edit stages)   (video lead uploads)
+```
+
+1. **Anyone with a @bricknbolt.com email** signs in and raises a request. The type decides the team, and the request goes to that team's lead — the coordinator for design, the video lead for video.
+2. **The lead** writes the brief and assigns it. The picker shows each person's current workload (open tasks, how many are due soon or already over) so the lead can assign on capacity. For design the lead also sets the task TAT; for video each stage runs on its own SLA.
+3. **The editor** moves the task along: *Start shoot* (or **No shoot needed**, which skips straight to First cut) → *Shoot done* + footage link → *First cut ready* → *Ready for QC*. Every stage can have its own person — the lead can change who is on any one stage or all the remaining ones.
+4. **QC** — design: the coordinator checks, then the requester or an admin gives final approval. Video: the lead checks, pastes the link to the uploaded file and the task is **Delivered**; the requester is notified. Sending it back starts a new round (R2, R3…).
+5. On the final step the assignee's turnaround is stored on the task and rolls up into the *Team turnaround* table.
+
+Every stage is timed against its limit (design: per-task TAT for production, 24h SLAs around it; video: a per-stage SLA the lead sets in Flow); breaches are flagged on cards, columns, the queue and the dashboard. The board shows that team's stage columns when a team filter is on, and five phase columns when it is not. Request types and their default TATs come from the team's tracker and are editable in Settings; the flow itself is editable by admins.
 
 **Live site:** https://pawankumar-bnb.github.io/creative-dashboard/ — every push to `main` redeploys it (see `.github/workflows/deploy.yml`).
 
@@ -29,6 +37,7 @@ Every stage is timed against its limit (coordinator SLA 24h, QC 24h, final appro
 | `config.js` | Publishable keys for Clerk and Supabase (website only) |
 | `supabase/schema.sql`, `supabase/seed.sql` | Database schema + RLS, and the first-run seed |
 | `supabase/notifications.sql`, `mailer/Code.gs` | Stage-change email notifications + weekly-roster sheet sync (database trigger/RPCs + Apps Script) |
+| `supabase/migrate-video-flow.sql` | One-off: installs the two-team flow and moves mid-flight video requests onto it |
 | `scripts/build-artifact.mjs` | Builds `dist/artifact.html` for the claude.ai Artifact viewer |
 | `.github/workflows/deploy.yml` | GitHub Pages deployment on push to `main` |
 
