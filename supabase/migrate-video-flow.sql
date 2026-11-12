@@ -18,9 +18,11 @@ update public.docs set data = jsonb_set(data, '{roles}', (
     select jsonb_agg(distinct r) from jsonb_array_elements(coalesce(data -> 'roles', '[]'::jsonb) || '["video","videolead"]'::jsonb) r))
   where collection = 'members' and id = 'pratyush.nath@bricknbolt.com';
 
-insert into public.docs (collection, id, data) values
-  ('members', 'hatchinghoi.hangsing@bricknbolt.com',
-   '{"email":"hatchinghoi.hangsing@bricknbolt.com","name":"Hatchinghoi Hangsing","roles":["video"],"active":true,"emailUnconfirmed":true}'::jsonb)
+-- the third editor, only if nobody with that name is on the roster already
+insert into public.docs (collection, id, data)
+select 'members', 'hatchinghoi.hangsing@bricknbolt.com',
+       '{"email":"hatchinghoi.hangsing@bricknbolt.com","name":"Hatchinghoi Hangsing","roles":["video"],"active":true,"emailUnconfirmed":true}'::jsonb
+where not exists (select 1 from public.docs where collection = 'members' and lower(data ->> 'name') like '%hatching%')
 on conflict (collection, id) do nothing;
 
 -- 3. mid-flight video requests --------------------------------------------

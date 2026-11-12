@@ -971,7 +971,7 @@ function viewQueue() {
   const open = S.requests.filter((r) => r.status === 'open');
   const by = (kind, pred) => open.filter((r) => needsMe(r) === kind && (!pred || pred(r)));
   const triage = by('triage'), work = by('work');
-  const reviews = open.filter((r) => needsMe(r) === 'review'); const isFinal = (r) => { const st = currentStage(r); const nx = st && nextStage(st.id, r); return st && nx && nx.kind === 'end'; };
+  const reviews = open.filter((r) => needsMe(r) === 'review'); const isFinal = (r) => { const st = currentStage(r); const nx = st && nextStage(st.id, r); return !!(st && nx && nx.kind === 'end' && !st.uploads); };   // an upload stage is the lead's QC, not someone's sign-off
   const qc = reviews.filter((r) => !isFinal(r)), approvals = reviews.filter(isFinal);
   const raised = open.filter((r) => isRequester(r) && needsMe(r) !== 'review');
   const item = (r) => { const st = currentStage(r); const s = slaState(r); return `<div class="list-item" data-open="${attr(r.id)}"><div class="li-main"><div class="li-title">${esc(r.id)} · ${esc(r.title)}</div><div class="li-sub">${esc(r.type)} · ${esc(r.priority)} · by ${esc(r.requester ? r.requester.name : '')} · in ${esc(st ? st.name : '')} for ${fmtDur(s.elapsed)}${s.state === 'crit' ? ` · <span style="color:var(--crit);font-weight:600">over limit</span>` : s.state === 'warn' ? ` · <span style="color:var(--warn);font-weight:600">${fmtDur(s.remaining)} left</span>` : ''}</div></div><div class="li-side">${stageChip(st)}</div></div>`; };
@@ -981,7 +981,7 @@ function viewQueue() {
   const reviewsAnyFlow = isAdmin() || allStages().some((s) => s.kind === 'review' && (s.reviewers || []).some((sp) => String(sp).startsWith('role:') && hasRole(S.me, sp.slice(5))));
   if (leadsAnyFlow) sections.push(sec('To brief & assign', 'New requests waiting for a brief and an owner', triage, 'clipboard'));
   sections.push(sec('Assigned to me', 'Tasks in production with you', work, 'inbox'));
-  if (reviewsAnyFlow) sections.push(sec('To QC', 'Submitted work waiting for your check', qc, 'eye'));
+  if (reviewsAnyFlow) sections.push(sec('To QC', 'Submitted work waiting for your check — and the upload, where you own it', qc, 'eye'));
   sections.push(sec('Waiting for my approval', isAdmin() ? 'Final approvals — you or the requester can approve' : 'Your requests that passed QC — approve or ask for changes', approvals, 'check'));
   sections.push(sec('My open requests', 'Requirements you raised, still in progress', raised, 'file'));
   return `<div class="page-head" data-anim><div><h1>My queue</h1><p class="lede">What is waiting on you, ${esc(firstName(S.me))} — ${roles().filter((r) => hasRole(S.me, r.id)).map((r) => r.name).join(', ') || 'no role yet'}.</p></div><div class="page-actions"><button class="btn primary" data-action="new">${ic('plus')}New request</button></div></div>
