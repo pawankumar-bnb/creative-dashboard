@@ -363,10 +363,17 @@ const workStages = (x) => stages(x).filter((s) => s.kind === 'work');
 const workStage = (x) => workStages(x)[0];
 /* A request whose stage is not in its team's flow (an old task after a flow change)
    is shown at the nearest stage of the same phase, so nothing is ever stranded. */
+const PHASE_ORDER = ['intake', 'brief', 'work', 'qc', 'approval', 'done'];
 function currentStage(r) {
   const own = stages(r).find((s) => s.id === r.stage); if (own) return own;
-  const old = stageById(r.stage);
-  return (old && stages(r).find((s) => s.phase === old.phase)) || firstStage(r) || null;
+  const old = stageById(r.stage); if (!old) return firstStage(r) || null;
+  const exact = stages(r).find((s) => s.phase === old.phase); if (exact) return exact;
+  const want = PHASE_ORDER.indexOf(old.phase);
+  /* no stage of that phase in this flow — take the closest one, earlier on a tie,
+     so work stays pending rather than jumping to the end */
+  let best = null, bestD = Infinity;
+  stages(r).forEach((s) => { const d = Math.abs(PHASE_ORDER.indexOf(s.phase) - want); if (d < bestD || (d === bestD && best && PHASE_ORDER.indexOf(s.phase) < PHASE_ORDER.indexOf(best.phase))) { best = s; bestD = d; } });
+  return best || firstStage(r) || null;
 }
 const wh = () => S.settings.workHours;
 const hasRole = (m, r) => !!m && Array.isArray(m.roles) && m.roles.includes(r);
@@ -1593,6 +1600,7 @@ function normalizeSettings(settings) {
   s.types = s.types.map((t) => typeof t === 'string' ? { id: slug(t), name: t, team: 'design', tatHours: 72 } : { tatHours: 72, team: 'design', ...t, id: t.id || slug(t.name) });
   if (!Array.isArray(s.allowedDomains)) s.allowedDomains = clone(DEFAULT_SETTINGS.allowedDomains);
   if (!Array.isArray(s.roles) || !s.roles.length) s.roles = clone(DEFAULT_ROLES);
+  DEFAULT_ROLES.forEach((d) => { if (!s.roles.some((r) => r.id === d.id)) s.roles.push(clone(d)); });   // new built-in roles appear without a migration
   s.notifications = { enabled: true, ...((settings && settings.notifications) || {}) };
   return s;
 }
