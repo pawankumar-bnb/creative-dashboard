@@ -286,45 +286,89 @@ class DbStore {
     return maxExisting + 1;
   }
 }
-/* Supabase-backed store: one `docs` table (collection, id, data) with row-level security
-   keyed on the Clerk session token. Realtime keeps every open tab in sync; if the
-   realtime channel cannot connect it falls back to polling. */
+/* Supabase-backed store: one `docs` table (collection, id, data) with row-level
+   security keyed on the Clerk session token.
+
+   Egress discipline — the client never re-reads what it already has:
+   · the first read of `requests` is windowed (everything open, plus anything
+     touched in the last SB_WINDOW_DAYS), not the whole table;
+   · after that only rows whose `updated_at` moved are fetched;
+   · what was fetched is cached in this browser, so a reload syncs a delta;
+   · a full re-read happens once a day, which is what lets deletions disappear;
+   · realtime carries changes live; the poll is only a fallback, runs at 60s and
+     only while the tab is visible. */
+const SB_CACHE = 'relay.sb.v1';
+const SB_WINDOW_DAYS = 180;
+const SB_RECONCILE_MS = 24 * 3600e3;
+const SB_POLL_MS = 60000;
 class SupabaseStore {
-  constructor(client) { this.sb = client; this.cache = {}; this.subs = {}; this.loaded = {}; this.channel = null; this.poll = null; }
+  constructor(client) {
+    this.sb = client; this.subs = {}; this.channel = null; this.poll = null;
+    let saved = null; try { saved = JSON.parse(localStorage.getItem(SB_CACHE) || 'null'); } catch (e) { saved = null; }
+    this.cache = (saved && saved.docs) || {};
+    this.since = (saved && saved.since) || {};
+    this.fullAt = (saved && saved.fullAt) || 0;
+    this.onWake = () => { if (document.visibilityState === 'visible') this.syncAll(); };
+    document.addEventListener('visibilitychange', this.onWake);
+    window.addEventListener('online', this.onWake);
+  }
+  persist() { clearTimeout(this._saveT); this._saveT = setTimeout(() => { try { localStorage.setItem(SB_CACHE, JSON.stringify({ docs: this.cache, since: this.since, fullAt: this.fullAt })); } catch (e) { /* quota or private mode */ } }, 1200); }
   list(col) { return Object.values(this.cache[col] || {}); }
   emit(col) { (this.subs[col] || []).forEach((cb) => cb(this.list(col))); }
-  async load(col) {
-    const { data, error } = await this.sb.from('docs').select('id,data').eq('collection', col);
-    if (error) throw { code: error.code === '42501' ? 'not_granted' : 'unavailable', message: error.message };
-    const map = {}; (data || []).forEach((row) => { map[row.id] = { ...(row.data || {}), id: row.id }; });
-    this.cache[col] = map; this.loaded[col] = true; this.emit(col);
+  merge(col, rows) {
+    const map = (this.cache[col] ||= {}); let latest = this.since[col] || '';
+    rows.forEach((row) => { map[row.id] = { ...(row.data || {}), id: row.id }; if (row.updated_at && row.updated_at > latest) latest = row.updated_at; });
+    this.since[col] = latest; this.persist();
   }
+  /* Full = the window (requests) or everything (small collections); otherwise the delta. */
+  async sync(col, full) {
+    let q = this.sb.from('docs').select('id,data,updated_at').eq('collection', col);
+    if (!full && this.since[col]) q = q.gt('updated_at', this.since[col]);
+    else if (col === 'requests') q = q.or(`data->>status.eq.open,updated_at.gte.${new Date(Date.now() - SB_WINDOW_DAYS * 864e5).toISOString()}`);
+    const { data, error } = await q;
+    if (error) throw this.err(error);
+    if (full) { this.cache[col] = {}; this.since[col] = ''; this.fullAt = Date.now(); }
+    this.merge(col, data || []);
+    this.emit(col);
+    return (data || []).length;
+  }
+  syncAll(full) { Object.keys(this.subs).forEach((col) => { if ((this.subs[col] || []).length) this.sync(col, full).catch(() => {}); }); }
   subscribe(col, cb, onErr) {
     (this.subs[col] ||= []).push(cb);
-    this.load(col).catch((e) => onErr && onErr(e));
+    if (this.cache[col]) setTimeout(() => cb(this.list(col)), 0);                 // paint from cache at once
+    const stale = !this.cache[col] || !this.since[col] || Date.now() - this.fullAt > SB_RECONCILE_MS;
+    this.sync(col, stale).catch((e) => onErr && onErr(e));
     this.ensureRealtime();
     return () => { this.subs[col] = (this.subs[col] || []).filter((f) => f !== cb); };
   }
   ensureRealtime() {
     if (this.channel) return;
     const apply = (payload) => {
-      const row = payload.new && payload.new.collection ? payload.new : payload.old; if (!row || !row.collection) { this.refreshAll(); return; }
+      const row = (payload.new && payload.new.collection) ? payload.new : payload.old;
+      if (!row || !row.collection) return;
       const col = row.collection; this.cache[col] ||= {};
-      if (payload.eventType === 'DELETE') delete this.cache[col][row.id]; else this.cache[col][row.id] = { ...(row.data || {}), id: row.id };
-      this.emit(col);
+      if (payload.eventType === 'DELETE') delete this.cache[col][row.id];
+      else { this.cache[col][row.id] = { ...(row.data || {}), id: row.id }; if (row.updated_at && row.updated_at > (this.since[col] || '')) this.since[col] = row.updated_at; }
+      this.persist(); this.emit(col);
     };
     this.channel = this.sb.channel('docs-live').on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, apply)
-      .subscribe((status) => { if (status === 'SUBSCRIBED') { if (this.poll) { clearInterval(this.poll); this.poll = null; } this.refreshAll(); } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { if (!this.poll) this.poll = setInterval(() => this.refreshAll(), 30000); } });
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') { this.stopPoll(); this.syncAll(); }                       // delta, not a reload
+        else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) this.startPoll();
+      });
   }
-  refreshAll() { Object.keys(this.subs).forEach((col) => { if (this.subs[col].length) this.load(col).catch(() => {}); }); }
-  async get(col, id) { const { data, error } = await this.sb.from('docs').select('id,data').eq('collection', col).eq('id', id).maybeSingle(); if (error) throw { code: 'unavailable', message: error.message }; return data ? { ...(data.data || {}), id: data.id } : null; }
-  async set(col, id, doc) { const body = stripId(doc); const { error } = await this.sb.from('docs').upsert({ collection: col, id, data: body }, { onConflict: 'collection,id' }); if (error) throw this.err(error); (this.cache[col] ||= {})[id] = { ...body, id }; this.emit(col); }
+  startPoll() { if (this.poll) return; this.poll = setInterval(() => { if (document.visibilityState === 'visible') this.syncAll(); }, SB_POLL_MS); }
+  stopPoll() { if (this.poll) { clearInterval(this.poll); this.poll = null; } }
+  async get(col, id) { const { data, error } = await this.sb.from('docs').select('id,data,updated_at').eq('collection', col).eq('id', id).maybeSingle(); if (error) throw this.err(error); return data ? { ...(data.data || {}), id: data.id } : null; }
+  /* One document that fell outside the window — opened from a link or an old report. */
+  async fetchOne(col, id) { const { data, error } = await this.sb.from('docs').select('id,data,updated_at').eq('collection', col).eq('id', id).maybeSingle(); if (error || !data) return null; this.merge(col, [data]); this.emit(col); return { ...(data.data || {}), id: data.id }; }
+  async set(col, id, doc) { const body = stripId(doc); const { error } = await this.sb.from('docs').upsert({ collection: col, id, data: body }, { onConflict: 'collection,id' }); if (error) throw this.err(error); (this.cache[col] ||= {})[id] = { ...body, id }; this.persist(); this.emit(col); }
   async update(col, id, patch) { const cur = (this.cache[col] || {})[id] || await this.get(col, id); if (!cur) throw { code: 'invalid_argument', message: 'missing' }; await this.set(col, id, { ...cur, ...stripId(patch) }); }
-  async del(col, id) { const { error } = await this.sb.from('docs').delete().eq('collection', col).eq('id', id); if (error) throw this.err(error); if (this.cache[col]) delete this.cache[col][id]; this.emit(col); }
+  async del(col, id) { const { error } = await this.sb.from('docs').delete().eq('collection', col).eq('id', id); if (error) throw this.err(error); if (this.cache[col]) delete this.cache[col][id]; this.persist(); this.emit(col); }
   async add(col, doc) { const id = uid(); await this.set(col, id, doc); return id; }
   async nextNumber(maxExisting) { try { const { data, error } = await this.sb.rpc('next_task_number'); if (!error && data) return Math.max(Number(data), maxExisting + 1); } catch (e) { /* fall through */ } return maxExisting + 1; }
   err(error) { const code = error && (error.code === '42501' || /row-level security/i.test(error.message || '')) ? 'not_granted' : 'unavailable'; return { code, message: error ? error.message : 'unknown' }; }
-  dispose() { if (this.channel) { try { this.sb.removeChannel(this.channel); } catch (e) { /* ignore */ } this.channel = null; } if (this.poll) clearInterval(this.poll); this.cache = {}; this.subs = {}; }
+  dispose() { if (this.channel) { try { this.sb.removeChannel(this.channel); } catch (e) { /* ignore */ } this.channel = null; } this.stopPoll(); document.removeEventListener('visibilitychange', this.onWake); window.removeEventListener('online', this.onWake); this.subs = {}; }
 }
 function stripId(doc) { const d = clone(doc); delete d.id; return d; }
 
@@ -1448,7 +1492,13 @@ function parseRequestForm(form) {
   return { title: f.title.trim(), request: (f.request || '').trim(), typeId: f.typeId, priority: f.priority, dueDate: f.dueDate || null, refs };
 }
 const daysToHours = (v) => Math.round(Number(v) * 24 * 2) / 2 || 0;
-function openRequest(id) { if (!getReq(id)) return toast('That request no longer exists.', 'crit'); S.modal = null; S.drawer = id; syncLayer(); if (location.hash !== `#/r/${id}`) history.replaceState(null, '', `#/r/${id}`); }
+async function openRequest(id) {
+  if (!getReq(id)) {
+    if (S.store && S.store.fetchOne) { const doc = await S.store.fetchOne('requests', id); if (!doc) return toast('That request no longer exists.', 'crit'); }
+    else return toast('That request no longer exists.', 'crit');
+  }
+  S.modal = null; S.drawer = id; syncLayer(); if (location.hash !== `#/r/${id}`) history.replaceState(null, '', `#/r/${id}`);
+}
 function closeDrawer() { S.drawer = null; syncLayer(); if (location.hash.startsWith('#/r/')) history.replaceState(null, '', `#/${S.route.view}`); }
 function openModal(m) { S.modal = m; syncLayer(); }
 function closeModal() { S.modal = null; syncLayer(); }
@@ -1456,7 +1506,7 @@ function confirmBox(opts) { return new Promise((res) => { S.modal = { type: 'con
 function noteBox(opts) { return new Promise((res) => { S.modal = { type: 'note', ...opts, _res: res }; syncLayer(); }); }
 
 document.addEventListener('click', async (e) => {
-  const openEl = e.target.closest('[data-open]'); if (openEl && !e.target.closest('a')) { openRequest(openEl.dataset.open); return; }
+  const openEl = e.target.closest('[data-open]'); if (openEl && !e.target.closest('a')) { await openRequest(openEl.dataset.open); return; }
   const popBtn = e.target.closest('[data-action="date-pop"]');
   const openPop = $('.date-pop:not([hidden])');
   if (openPop && !e.target.closest('.date-pop')) { openPop.hidden = true; if (!popBtn) return; }
@@ -1476,7 +1526,7 @@ document.addEventListener('click', async (e) => {
     case 'confirm-ok': { const m = S.modal; closeModal(); if (m && m._res) m._res(true); break; }
     case 'close-drawer': closeDrawer(); break;
     case 'gate-back': S.gatePending = null; renderAll(false); break;
-    case 'signout': if (S.authMode === 'clerk' && S.clerk) { try { await S.clerk.signOut(); } catch (e) { /* ignore */ } location.assign(pageUrl()); return; } localStorage.removeItem(LS.me); S.me = null; S.drawer = null; S.modal = null; S.flowDraft = null; S.settingsDraft = null; S.gatePending = null; renderAll(true); break;
+    case 'signout': try { localStorage.removeItem(SB_CACHE); } catch (e) { /* ignore */ } if (S.store && S.store.dispose) S.store.dispose(); if (S.authMode === 'clerk' && S.clerk) { try { await S.clerk.signOut(); } catch (e) { /* ignore */ } location.assign(pageUrl()); return; } localStorage.removeItem(LS.me); S.me = null; S.drawer = null; S.modal = null; S.flowDraft = null; S.settingsDraft = null; S.gatePending = null; renderAll(true); break;
     case 'edit': openModal({ type: 'edit', id }); break;
     case 'save-brief': { const form = act.closest('form'); const f = formData(form); const tat = readTat(form); if (!tat) return; await actSaveBrief(id, { brief: (f.brief || '').trim(), team: f.team, tat }); break; }
     case 'set-tat': { const form = act.closest('form'); const tat = readTat(form); if (!tat) return; await actSetTat(id, tat); break; }

@@ -54,6 +54,8 @@ The app picks its identity and storage at start-up:
 | claude.ai Artifact | roster check (typed email) | Artifact `db` | Yes |
 | Anything else (local file, plain static host) | roster check | `localStorage` ("Demo mode") | No |
 
+The browser never re-reads what it already has: the first read of `requests` is windowed (everything open, plus anything touched in the last 180 days), everything after that fetches only rows whose `updated_at` moved, the result is cached in the browser so a reload syncs a delta, a full re-read runs once a day (which is how deletions disappear), and the 60-second poll is only a fallback for when realtime is down — it is skipped while the tab is hidden. A task older than the window still opens from a link; it is fetched on demand.
+
 `config.js` holds only **publishable** keys (safe in git). `supabase/schema.sql` creates the table, helper functions, realtime publication, RLS policies and a guard trigger (nobody can give themselves a role); `supabase/seed.sql` loads the flow, settings, roster and sample tasks. Run both once in the Supabase SQL editor.
 
 Clerk must be configured with: Google enabled, the `bricknbolt.com` allow-list, the **Supabase integration** activated (adds `role: authenticated` to session tokens), and a session-token claim `"email": "{{user.primary_email_address}}"` (the RLS policies and the roster are keyed on it).
