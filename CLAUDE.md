@@ -41,7 +41,7 @@
 
 ## Egress discipline (why the store looks the way it does)
 
-- Nov 2026: the free tier blew its 5 GB egress (8.6 GB) on a 27 MB database — the old store re-read whole collections, and its 30s fallback poll re-read them again per open tab. `SupabaseStore` now does: windowed first read (`data->>status.eq.open` OR `updated_at.gte.<180d>`), delta reads on `updated_at`, a localStorage cache (`relay.sb.v1`, cleared on sign-out), a once-a-day full reconcile (`SB_RECONCILE_MS`) so deletions propagate, and a 60s poll that only runs when realtime is down AND the tab is visible. `fetchOne()` pulls a single out-of-window task for deep links.
+- Nov 2026: the free tier blew its 5 GB egress (8.6 GB) on a 27 MB database — the old store re-read whole collections, and its 30s fallback poll re-read them again per open tab. `SupabaseStore` now does: windowed first read (`data->>status.eq.open` OR `updated_at.gte.<60d>`) for a fast paint, a one-off background `backfill()` of everything older so the full history is still local, delta reads on `updated_at`, a localStorage cache (`relay.sb.v1`, cleared on sign-out, degrades to the recent slice if over quota), a daily `reconcile()` that reads `id,updated_at` only and re-fetches bodies just for what changed (this is what propagates deletions), and a 60s poll that only runs when realtime is down AND the tab is visible. `fetchOne()` pulls a single task for deep links. Measured at 2,400 tasks: 4 MB once per browser, then ~135 kB/day.
 - Keep any new query scoped the same way; a `select` over a whole collection on a timer is what caused the overage.
 
 ## Data model reminders

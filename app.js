@@ -289,16 +289,17 @@ class DbStore {
 /* Supabase-backed store: one `docs` table (collection, id, data) with row-level
    security keyed on the Clerk session token.
 
-   Egress discipline — the client never re-reads what it already has:
-   · the first read of `requests` is windowed (everything open, plus anything
-     touched in the last SB_WINDOW_DAYS), not the whole table;
+   Egress discipline — the client holds the full history but never re-reads it:
+   · the first read of `requests` is windowed so the board paints fast, then the
+     rest of the archive is back-filled once in the background;
    · after that only rows whose `updated_at` moved are fetched;
    · what was fetched is cached in this browser, so a reload syncs a delta;
-   · a full re-read happens once a day, which is what lets deletions disappear;
+   · the daily reconcile that catches deletions reads ids and timestamps only
+     (~45 bytes a row), and pulls bodies just for what actually changed;
    · realtime carries changes live; the poll is only a fallback, runs at 60s and
      only while the tab is visible. */
 const SB_CACHE = 'relay.sb.v1';
-const SB_WINDOW_DAYS = 180;
+const SB_WINDOW_DAYS = 60;      // the fast first paint; the rest of the archive follows in the background
 const SB_RECONCILE_MS = 24 * 3600e3;
 const SB_POLL_MS = 60000;
 class SupabaseStore {
@@ -307,17 +308,37 @@ class SupabaseStore {
     let saved = null; try { saved = JSON.parse(localStorage.getItem(SB_CACHE) || 'null'); } catch (e) { saved = null; }
     this.cache = (saved && saved.docs) || {};
     this.since = (saved && saved.since) || {};
+    this.stamps = (saved && saved.stamps) || {};     // id → updated_at, for the id sweep
+    this.filled = (saved && saved.filled) || {};     // collections whose archive is already here
     this.fullAt = (saved && saved.fullAt) || 0;
     this.onWake = () => { if (document.visibilityState === 'visible') this.syncAll(); };
     document.addEventListener('visibilitychange', this.onWake);
     window.addEventListener('online', this.onWake);
   }
-  persist() { clearTimeout(this._saveT); this._saveT = setTimeout(() => { try { localStorage.setItem(SB_CACHE, JSON.stringify({ docs: this.cache, since: this.since, fullAt: this.fullAt })); } catch (e) { /* quota or private mode */ } }, 1200); }
+  persist() {
+    clearTimeout(this._saveT);
+    this._saveT = setTimeout(() => {
+      const blob = { docs: this.cache, since: this.since, stamps: this.stamps, filled: this.filled, fullAt: this.fullAt };
+      try { localStorage.setItem(SB_CACHE, JSON.stringify(blob)); return; } catch (e) { /* over the browser's quota */ }
+      try {   // keep the recent slice so a reload is still a delta; the archive is re-fetched next cold start
+        const cut = new Date(Date.now() - SB_WINDOW_DAYS * 864e5).toISOString();
+        const docs = {}, stamps = {};
+        Object.keys(this.cache).forEach((col) => {
+          docs[col] = {}; stamps[col] = {};
+          Object.keys(this.cache[col]).forEach((id) => {
+            const st = (this.stamps[col] || {})[id] || '';
+            if (col !== 'requests' || st >= cut || this.cache[col][id].status === 'open') { docs[col][id] = this.cache[col][id]; stamps[col][id] = st; }
+          });
+        });
+        localStorage.setItem(SB_CACHE, JSON.stringify({ docs, since: this.since, stamps, filled: {}, fullAt: this.fullAt }));
+      } catch (e) { try { localStorage.removeItem(SB_CACHE); } catch (e2) { /* private mode */ } }
+    }, 1200);
+  }
   list(col) { return Object.values(this.cache[col] || {}); }
   emit(col) { (this.subs[col] || []).forEach((cb) => cb(this.list(col))); }
   merge(col, rows) {
-    const map = (this.cache[col] ||= {}); let latest = this.since[col] || '';
-    rows.forEach((row) => { map[row.id] = { ...(row.data || {}), id: row.id }; if (row.updated_at && row.updated_at > latest) latest = row.updated_at; });
+    const map = (this.cache[col] ||= {}); const st = (this.stamps[col] ||= {}); let latest = this.since[col] || '';
+    rows.forEach((row) => { map[row.id] = { ...(row.data || {}), id: row.id }; st[row.id] = row.updated_at || ''; if (row.updated_at && row.updated_at > latest) latest = row.updated_at; });
     this.since[col] = latest; this.persist();
   }
   /* Full = the window (requests) or everything (small collections); otherwise the delta. */
@@ -327,17 +348,47 @@ class SupabaseStore {
     else if (col === 'requests') q = q.or(`data->>status.eq.open,updated_at.gte.${new Date(Date.now() - SB_WINDOW_DAYS * 864e5).toISOString()}`);
     const { data, error } = await q;
     if (error) throw this.err(error);
-    if (full) { this.cache[col] = {}; this.since[col] = ''; this.fullAt = Date.now(); }
+    if (full) { this.cache[col] = {}; this.stamps[col] = {}; this.since[col] = ''; this.fullAt = Date.now(); }
     this.merge(col, data || []);
     this.emit(col);
+    if (full && col === 'requests' && !this.filled[col]) setTimeout(() => this.backfill(col), 2500);   // archive, after the board is up
     return (data || []).length;
+  }
+  /* Everything older than the window, fetched once per browser and then cached. */
+  async backfill(col) {
+    if (this.filled[col]) return 0;
+    const cut = new Date(Date.now() - SB_WINDOW_DAYS * 864e5).toISOString();
+    const { data, error } = await this.sb.from('docs').select('id,data,updated_at').eq('collection', col).lt('updated_at', cut);
+    if (error) return 0;
+    this.merge(col, data || []); this.filled[col] = true; this.persist(); this.emit(col);
+    return (data || []).length;
+  }
+  /* Daily sweep: ids and timestamps only, then bodies for what actually moved. */
+  async reconcile(col) {
+    const { data, error } = await this.sb.from('docs').select('id,updated_at').eq('collection', col);
+    if (error) throw this.err(error);
+    const server = data || []; const seen = new Set(); const stale = [];
+    const st = (this.stamps[col] ||= {}); const map = (this.cache[col] ||= {});
+    server.forEach((row) => { seen.add(row.id); if (!map[row.id] || st[row.id] !== row.updated_at) stale.push(row.id); });
+    let gone = 0;
+    Object.keys(map).forEach((id) => { if (!seen.has(id)) { delete map[id]; delete st[id]; gone++; } });
+    for (let i = 0; i < stale.length; i += 100) {
+      const chunk = stale.slice(i, i + 100);
+      const res = await this.sb.from('docs').select('id,data,updated_at').eq('collection', col).in('id', chunk);
+      if (!res.error) this.merge(col, res.data || []);
+    }
+    this.fullAt = Date.now(); this.persist(); this.emit(col);
+    return { checked: server.length, refetched: stale.length, removed: gone };
   }
   syncAll(full) { Object.keys(this.subs).forEach((col) => { if ((this.subs[col] || []).length) this.sync(col, full).catch(() => {}); }); }
   subscribe(col, cb, onErr) {
     (this.subs[col] ||= []).push(cb);
     if (this.cache[col]) setTimeout(() => cb(this.list(col)), 0);                 // paint from cache at once
-    const stale = !this.cache[col] || !this.since[col] || Date.now() - this.fullAt > SB_RECONCILE_MS;
-    this.sync(col, stale).catch((e) => onErr && onErr(e));
+    const cold = !this.cache[col] || !this.since[col];
+    const due = Date.now() - this.fullAt > SB_RECONCILE_MS;
+    const first = this.sync(col, cold);
+    first.then(() => { if (!cold && due) return this.reconcile(col); if (!cold && !this.filled[col] && col === 'requests') return this.backfill(col); })
+      .catch((e) => onErr && onErr(e));
     this.ensureRealtime();
     return () => { this.subs[col] = (this.subs[col] || []).filter((f) => f !== cb); };
   }
@@ -347,8 +398,8 @@ class SupabaseStore {
       const row = (payload.new && payload.new.collection) ? payload.new : payload.old;
       if (!row || !row.collection) return;
       const col = row.collection; this.cache[col] ||= {};
-      if (payload.eventType === 'DELETE') delete this.cache[col][row.id];
-      else { this.cache[col][row.id] = { ...(row.data || {}), id: row.id }; if (row.updated_at && row.updated_at > (this.since[col] || '')) this.since[col] = row.updated_at; }
+      if (payload.eventType === 'DELETE') { delete this.cache[col][row.id]; if (this.stamps[col]) delete this.stamps[col][row.id]; }
+      else { this.cache[col][row.id] = { ...(row.data || {}), id: row.id }; (this.stamps[col] ||= {})[row.id] = row.updated_at || ''; if (row.updated_at && row.updated_at > (this.since[col] || '')) this.since[col] = row.updated_at; }
       this.persist(); this.emit(col);
     };
     this.channel = this.sb.channel('docs-live').on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, apply)
@@ -362,9 +413,9 @@ class SupabaseStore {
   async get(col, id) { const { data, error } = await this.sb.from('docs').select('id,data,updated_at').eq('collection', col).eq('id', id).maybeSingle(); if (error) throw this.err(error); return data ? { ...(data.data || {}), id: data.id } : null; }
   /* One document that fell outside the window — opened from a link or an old report. */
   async fetchOne(col, id) { const { data, error } = await this.sb.from('docs').select('id,data,updated_at').eq('collection', col).eq('id', id).maybeSingle(); if (error || !data) return null; this.merge(col, [data]); this.emit(col); return { ...(data.data || {}), id: data.id }; }
-  async set(col, id, doc) { const body = stripId(doc); const { error } = await this.sb.from('docs').upsert({ collection: col, id, data: body }, { onConflict: 'collection,id' }); if (error) throw this.err(error); (this.cache[col] ||= {})[id] = { ...body, id }; this.persist(); this.emit(col); }
+  async set(col, id, doc) { const body = stripId(doc); const { error } = await this.sb.from('docs').upsert({ collection: col, id, data: body }, { onConflict: 'collection,id' }); if (error) throw this.err(error); (this.cache[col] ||= {})[id] = { ...body, id }; if (this.stamps[col]) delete this.stamps[col][id]; this.persist(); this.emit(col); }
   async update(col, id, patch) { const cur = (this.cache[col] || {})[id] || await this.get(col, id); if (!cur) throw { code: 'invalid_argument', message: 'missing' }; await this.set(col, id, { ...cur, ...stripId(patch) }); }
-  async del(col, id) { const { error } = await this.sb.from('docs').delete().eq('collection', col).eq('id', id); if (error) throw this.err(error); if (this.cache[col]) delete this.cache[col][id]; this.persist(); this.emit(col); }
+  async del(col, id) { const { error } = await this.sb.from('docs').delete().eq('collection', col).eq('id', id); if (error) throw this.err(error); if (this.cache[col]) delete this.cache[col][id]; if (this.stamps[col]) delete this.stamps[col][id]; this.persist(); this.emit(col); }
   async add(col, doc) { const id = uid(); await this.set(col, id, doc); return id; }
   async nextNumber(maxExisting) { try { const { data, error } = await this.sb.rpc('next_task_number'); if (!error && data) return Math.max(Number(data), maxExisting + 1); } catch (e) { /* fall through */ } return maxExisting + 1; }
   err(error) { const code = error && (error.code === '42501' || /row-level security/i.test(error.message || '')) ? 'not_granted' : 'unavailable'; return { code, message: error ? error.message : 'unknown' }; }
