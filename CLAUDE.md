@@ -34,7 +34,7 @@
 
 ## Flows (one per team)
 
-- `config/flow` = `{version, teams: {design: [...stages], video: [...stages]}}`. `normalizeFlow()` upgrades the old `{stages: [...]}` document (it becomes the design flow). Stage ids are unique across flows, so `stageById(id)` searches both; anything order-dependent (`stageIdx`, `nextStage`, `prevStage`, `boardStages`, `workStages`, `firstStage`) takes the request or a team id.
+- `config/flow` = `{version, teams: {design, content, video}}` (`TEAM_IDS`; `teamIds()` reads whatever is stored so an added team shows up). Content mirrors design with role `content`; `assignRole(r)`/`assignRoleFor(team)` resolve who does the work ('team' means the team's own role). `normalizeFlow()` upgrades the old `{stages: [...]}` document (it becomes the design flow). Stage ids are unique across flows, so `stageById(id)` searches both; anything order-dependent (`stageIdx`, `nextStage`, `prevStage`, `boardStages`, `workStages`, `firstStage`) takes the request or a team id.
 - `currentStage(r)` maps a request whose stage is not in its team's flow onto the nearest stage of the same `phase`, so a flow change never strands a task.
 - Video stage extras: `step/skipTo/skipLabel/nextLabel` (Assigned → "Start shoot" / "No shoot needed"), `fileLabel`, `uploads` (QC & upload requires the uploaded link to pass). Per-stage assignees live in `r.assignees[stageId]`; the lead sets them all at assignment and can change one stage or the rest (`actReassign(id, email, scope)`).
 - `PHASES` drives the board columns when no team filter is set, and the dashboard's "Where work is sitting".

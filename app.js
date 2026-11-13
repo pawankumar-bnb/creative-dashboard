@@ -23,8 +23,9 @@ const DEFAULT_ROLES = [
   { id: 'design',      name: 'Graphic design', color: '#4a3aa7', desc: 'Designers — banners, creatives, collaterals, decks' },
   { id: 'video',       name: 'Video editing',  color: '#0E9384', desc: 'Video editors — GIFs, reels, event and testimonial shoots' },
   { id: 'videolead',   name: 'Video lead',     color: '#0E7490', desc: 'Runs the video flow: takes every brief, assigns the editors, does QC and uploads the final file' },
+  { id: 'content',     name: 'Content writing', color: '#C11574', desc: 'Writers — scripts, pointers, copy for every channel' },
 ];
-const TEAMS = [{ id: 'design', name: 'Graphic design team' }, { id: 'video', name: 'Video editing team' }];
+const TEAMS = [{ id: 'design', name: 'Graphic design team' }, { id: 'content', name: 'Content team' }, { id: 'video', name: 'Video editing team' }];
 const DEFAULT_TYPES = [
   { id: 'lp-banners',   name: 'LP / Website banners',            team: 'design', tatHours: 24,  from: 'Abhinav / Kunal',    goesTo: 'Manju',              note: 'High priority' },
   { id: 'crm',          name: 'CRM creatives',                   team: 'design', tatHours: 72,  from: 'Siddharth',          goesTo: 'Yogesh',             note: '2–3 days' },
@@ -32,6 +33,10 @@ const DEFAULT_TYPES = [
   { id: 'social-design', name: 'Social media creatives',         team: 'design', tatHours: 24,  from: 'Sakshi / Dishika',   goesTo: 'Yogesh',             note: '1 day' },
   { id: 'atl-btl',      name: 'ATL / BTL / Event collaterals',   team: 'design', tatHours: 240, from: 'External team',      goesTo: 'Manju',              note: '7–10 days' },
   { id: 'decks',        name: 'Decks / Pitch brochures',         team: 'design', tatHours: 96,  from: 'External team',      goesTo: 'Manju',              note: '3–4 days' },
+  { id: 'scripts',      name: 'Scripts & pointers',              team: 'content', tatHours: 48, from: 'Abhinav / Sakshi',   goesTo: 'Dishika',            note: '2 days' },
+  { id: 'copy-social',  name: 'Social media copy',               team: 'content', tatHours: 24, from: 'Sakshi / Dishika',   goesTo: 'Dishika',            note: '1 day' },
+  { id: 'copy-ads',     name: 'Ad & performance copy',           team: 'content', tatHours: 24, from: 'Abhinav',            goesTo: 'Dishika',            note: '1 day' },
+  { id: 'blog',         name: 'Blog / long-form article',        team: 'content', tatHours: 96, from: 'Marketing',          goesTo: 'Dishika',            note: '3–4 days' },
   { id: 'perf-video',   name: 'Performance GIFs / videos',       team: 'video',  tatHours: 24,  from: 'Abhinav',            goesTo: 'Pratyush',           note: 'High priority' },
   { id: 'social-video', name: 'Social media videos',             team: 'video',  tatHours: 24,  from: 'Sakshi / Dishika',   goesTo: 'Dhanraj',            note: '1 day' },
   { id: 'hr-events',    name: 'HR event shoots (in-house)',      team: 'video',  tatHours: 24,  from: 'Preety',             goesTo: 'Pratyush',           note: '1 day' },
@@ -50,6 +55,14 @@ const DEFAULT_FLOW = {
       { id: 'approval',   name: 'Final approval', kind: 'review', reviewers: ['requester', 'role:admin'], slaHours: 24, editsTo: 'production', phase: 'approval', color: '#2a78d6' },
       { id: 'done',       name: 'Approved',       kind: 'end',    role: '',            slaHours: 0,  phase: 'done',   color: '#0ca30c' },
     ],
+    content: [
+      { id: 'c-intake',   name: 'Requested',      kind: 'start',  role: 'requester',   slaHours: 0,  phase: 'intake', color: '#64748B' },
+      { id: 'c-brief',    name: 'Brief & assign', kind: 'triage', role: 'coordinator', slaHours: 24, phase: 'brief',  color: '#1baf7a' },
+      { id: 'c-writing',  name: 'Writing',        kind: 'work',   role: 'content',     slaHours: 0,  slaFrom: 'task', needsFile: true, fileLabel: 'draft link', nextLabel: 'Ready for QC', phase: 'work', color: '#C11574' },
+      { id: 'c-qc',       name: 'QC',             kind: 'review', reviewers: ['role:coordinator'],    slaHours: 24, editsTo: 'c-writing', phase: 'qc', color: '#eb6834' },
+      { id: 'c-approval', name: 'Final approval', kind: 'review', reviewers: ['requester', 'role:admin'], slaHours: 24, editsTo: 'c-writing', phase: 'approval', color: '#2a78d6' },
+      { id: 'c-done',     name: 'Approved',       kind: 'end',    role: '',            slaHours: 0,  phase: 'done',   color: '#0ca30c' },
+    ],
     video: [
       { id: 'v-intake',   name: 'Requested',      kind: 'start',  role: 'requester',   slaHours: 0,  phase: 'intake', color: '#64748B' },
       { id: 'v-brief',    name: 'Brief received', kind: 'triage', role: 'videolead',   slaHours: 12, phase: 'brief',  color: '#1baf7a' },
@@ -58,6 +71,7 @@ const DEFAULT_FLOW = {
       { id: 'v-firstcut', name: 'First cut',      kind: 'work',   role: 'video',       slaHours: 48, phase: 'work',   color: '#e87ba4', needsFile: true, fileLabel: 'first-cut link', nextLabel: 'First cut ready' },
       { id: 'v-final',    name: 'Final edit',     kind: 'work',   role: 'video',       slaHours: 24, phase: 'work',   color: '#2a78d6', needsFile: true, fileLabel: 'final file link', nextLabel: 'Ready for QC' },
       { id: 'v-qc',       name: 'QC & upload',    kind: 'review', reviewers: ['role:videolead'],      slaHours: 24, editsTo: 'v-final', phase: 'qc', uploads: true, color: '#eb6834' },
+      { id: 'v-approval', name: 'Final approval', kind: 'review', reviewers: ['requester', 'role:admin'], slaHours: 24, editsTo: 'v-final', phase: 'approval', color: '#2a78d6' },
       { id: 'v-done',     name: 'Delivered',      kind: 'end',    role: '',            slaHours: 0,  phase: 'done',   color: '#0ca30c' },
     ],
   },
@@ -442,12 +456,13 @@ const roleColor = (id) => (roleById(id) || {}).color || '#64748B';
 const teamName = (id) => (TEAMS.find((t) => t.id === id) || {}).name || roleName(id);
 const types = () => S.settings.types || [];
 const typeById = (id) => types().find((t) => t.id === id);
-const TEAM_IDS = ['design', 'video'];
+const TEAM_IDS = ['design', 'content', 'video'];
+const teamIds = () => Object.keys(flowTeams());
 const flowTeams = () => (S.flow && S.flow.teams) || DEFAULT_FLOW.teams;
 const teamOf = (r) => (r && r.team && flowTeams()[r.team] ? r.team : 'design');
 /* Stages of one team's flow; `stages(r)` takes a request, a team id, or nothing (design). */
 function stages(x) { const t = typeof x === 'string' ? x : teamOf(x); return flowTeams()[t] || flowTeams().design || []; }
-const allStages = () => TEAM_IDS.flatMap((t) => flowTeams()[t] || []);
+const allStages = () => teamIds().flatMap((t) => flowTeams()[t] || []);
 const stageById = (id) => allStages().find((s) => s.id === id);
 const stageIdx = (id, r) => stages(r).findIndex((s) => s.id === id);
 const nextStage = (id, r) => stages(r)[stageIdx(id, r) + 1];
@@ -481,6 +496,9 @@ const membersWithRole = (role) => activeMembers().filter((m) => hasRole(m, role)
 const coordinators = () => membersWithRole('coordinator');
 const coordinatorNames = () => coordinators().map((m) => m.name).join(' / ') || 'the coordinator';
 const stageOwnerRole = (st, r) => (st.role === 'team' ? (r && r.team) || 'design' : st.role);
+/* The role that does the work on this request's flow — 'team' means the team's own role. */
+function assignRole(r) { const w = workStage(r); return w ? (w.role === 'team' ? teamOf(r) : w.role) : teamOf(r); }
+function assignRoleFor(team) { const w = workStage(team); return w ? (w.role === 'team' ? team : w.role) : team; }
 /* Who is doing the work: the person on the current work stage, else the last one set. */
 function assigneeOf(r) {
   const as = r.assignees || {}; const st = currentStage(r);
@@ -977,7 +995,7 @@ function filtersHtml() {
     <select class="input sm" data-filter="team" aria-label="Filter by team" style="width:auto"><option value="">Both teams</option>${TEAMS.map((t) => `<option value="${attr(t.id)}" ${f.team === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
     <select class="input sm" data-filter="type" aria-label="Filter by type" style="width:auto"><option value="">All types</option>${types().map((t) => `<option value="${attr(t.id)}" ${f.type === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
     <select class="input sm" data-filter="prio" aria-label="Filter by priority" style="width:auto"><option value="">All priorities</option>${S.settings.priorities.map((t) => `<option ${f.prio === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
-    ${S.boardMode === 'list' ? `<select class="input sm" data-filter="stage" aria-label="Filter by stage" style="width:auto"><option value="">All stages</option>${TEAM_IDS.filter((t) => !f.team || f.team === t).map((t) => `<optgroup label="${attr(teamName(t))}">${stages(t).filter((s) => s.kind !== 'start').map((s) => `<option value="${attr(s.id)}" ${f.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}</select>` : ''}
+    ${S.boardMode === 'list' ? `<select class="input sm" data-filter="stage" aria-label="Filter by stage" style="width:auto"><option value="">All stages</option>${teamIds().filter((t) => !f.team || f.team === t).map((t) => `<optgroup label="${attr(teamName(t))}">${stages(t).filter((s) => s.kind !== 'start').map((s) => `<option value="${attr(s.id)}" ${f.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}</select>` : ''}
     ${peopleSelectHtml(f.person)}
     <div class="pop-wrap"><button class="btn sm ${f.from || f.to ? 'primary' : ''}" data-action="date-pop" aria-haspopup="true">${ic('calendar', 'sm')}${esc(dateRangeLabel(f))}</button>${dateRangePopHtml(f)}</div>
     <button class="btn sm ${f.mine ? 'primary' : ''}" data-toggle="mine">${ic('user', 'sm')}Mine</button>
@@ -990,7 +1008,7 @@ function filtersHtml() {
 /* People dropdown, grouped by what they do. */
 function peopleSelectHtml(sel) {
   const seen = new Set(); const groups = [];
-  [['coordinator', 'Coordinator'], ['design', 'Graphic design'], ['video', 'Video editing'], ['admin', 'Admin'], ['requester', 'Requesters']].forEach(([role, label]) => {
+  [['coordinator', 'Coordinator'], ['design', 'Graphic design'], ['content', 'Content writing'], ['video', 'Video editing'], ['admin', 'Admin'], ['requester', 'Requesters']].forEach(([role, label]) => {
     const ms = membersWithRole(role).filter((m) => !seen.has(m.id)); ms.forEach((m) => seen.add(m.id));
     if (ms.length) groups.push(`<optgroup label="${attr(label)}">${ms.sort((a, b) => a.name.localeCompare(b.name)).map((m) => `<option value="${attr(m.email)}" ${sameEmail(sel, m.email) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</optgroup>`);
   });
@@ -1097,8 +1115,8 @@ function viewTeam() {
       <div class="panel" data-anim><div class="panel-head"><div><h2>Roles</h2><div class="sub">What each role can do in the relay</div></div>${admin ? `<button class="btn sm" data-action="add-role">${ic('plus', 'sm')}Add role</button>` : ''}</div><div class="panel-body" style="padding-top:8px"><div class="list">${roles().map((r) => `<div class="list-item" style="cursor:default"><span class="role-chip" style="--c:${attr(r.color)}"><i></i>${esc(r.name)}</span><div class="li-main"><div class="li-sub" style="white-space:normal">${esc(r.desc || '')} · ${plural(membersWithRole(r.id).length, 'member')}</div></div>${admin && !['admin', 'requester', 'coordinator', 'design', 'video'].includes(r.id) && !allStages().some((s) => s.role === r.id) ? `<button class="btn ghost sm icon-only" data-action="remove-role" data-id="${attr(r.id)}" aria-label="Remove role">${ic('trash', 'sm')}</button>` : ''}</div>`).join('')}</div></div></div>
       <div class="panel" data-anim><div class="panel-head"><div><h2>How access works</h2></div></div><div class="panel-body"><div class="stack" style="gap:10px;font-size:13.5px;color:var(--ink-2)">
         <p><b>1. Anyone at Brick&amp;Bolt can raise a request.</b> A ${esc((S.settings.allowedDomains || []).map((d) => '@' + d).join(' / '))} email signs in on first use and gets the Requester role automatically.</p>
-        <p><b>2. Every request goes to the coordinator</b> (${esc(coordinatorNames())}), who writes the brief with the requester, assigns it to the design or video team and sets the TAT.</p>
-        <p><b>3. Approvals.</b> The coordinator does QC; then either the person who raised it or an admin gives final approval — whichever comes first.</p>
+        <p><b>2. Every request goes to its team's lead</b> — ${esc(coordinatorNames())} for design and content, the video lead for video — who writes the brief with the requester, assigns it and sets the TAT.</p>
+        <p><b>3. Approvals.</b> The coordinator does QC on design and content, the video lead on video; then either the person who raised it or an admin gives final approval — whichever comes first.</p>
         <p class="muted small">Sign-in is a roster check, not a password. ${S.mode === 'live' ? 'The real access gate is who this page is shared with.' : 'In demo mode everything stays in this browser.'}</p></div></div></div>
     </div>
   </div>`;
@@ -1183,7 +1201,7 @@ function viewFlow() {
     <div class="panel-body">${flowDiagram((admin ? f.teams : flowTeams())[team] || [])}</div>
     ${admin ? editorFor(team) : ''}</div>`;
   return `<div class="page-head" data-anim><div><h1>Flow</h1><p class="lede">Each team runs its own flow. Version ${S.flow.version || 1}${S.flow.updatedAt ? ` · updated ${fmtRel(S.flow.updatedAt)}` : ''}.</p></div>${admin ? `<div class="page-actions"><button class="btn ghost" data-action="reset-flow">Discard changes</button><button class="btn primary" data-action="save-flow">${ic('check')}Save flows</button></div>` : ''}</div>
-  <div class="stack">${TEAM_IDS.map(section).join('')}
+  <div class="stack">${teamIds().map(section).join('')}
   ${admin ? `<div class="callout">A <b>Brief / triage</b> stage is where the lead writes the brief, picks the person and (for a per-task TAT) sets the hours. <b>Work</b> stages run in order — each has its own SLA and its own assignee, defaulting to the person picked at assignment. An <b>Approval</b> stage can be passed by any of the people ticked; "changes" send the task back to the stage you choose as a new round.</div>` : ''}</div>`;
 }
 function viewSettings() {
@@ -1259,8 +1277,8 @@ function workloadOf(email) {
   return { open: open.length, soon: soon.length, over: open.filter(isBreachedNow).length };
 }
 function workloadPickerHtml(team, selected, suggested) {
-  const people = membersWithRole(team === 'video' ? 'video' : 'design');
-  if (!people.length) return `<p class="small muted">Nobody holds the ${esc(roleName(team === 'video' ? 'video' : 'design'))} role yet — add it on the Team page.</p>`;
+  const role = assignRoleFor(team); const people = membersWithRole(role);
+  if (!people.length) return `<p class="small muted">Nobody holds the ${esc(roleName(role))} role yet — add it on the Team page.</p>`;
   const rows = people.map((m) => {
     const w = workloadOf(m.email); const on = selected ? sameEmail(selected, m.email) : false;
     const load = w.open === 0 ? 'free' : `${w.open} open${w.soon ? ` · ${w.soon} due soon` : ''}${w.over ? ` · ${w.over} over` : ''}`;
@@ -1277,7 +1295,7 @@ function actionPanelHtml(r) {
     const cs = membersWithRole(st.role);
     if (!canTriage(r, st)) return `<div class="action-panel"><div class="row between wrap"><h3>With ${esc(cs.length ? cs.map((m) => m.name).join(' / ') : roleName(st.role))} for the brief</h3>${lim}</div><p class="small muted">${cs.length ? `${esc(cs.length === 1 ? cs[0].name : 'The coordinator')} will confirm the details with ${isRequester(r) ? 'you' : esc(firstName(r.requester))}, write the creative brief, pick who works on it and set the TAT.` : `Nobody has the ${esc(roleName(st.role))} role yet — an admin needs to assign it under Team.`}</p>${r.brief ? `<div class="divider" style="margin:4px 0"></div><div class="section-title">Creative brief (draft)</div><div class="brief">${esc(r.brief)}</div>` : ''}</div>`;
     const team = teamOf(r); const ty = typeById(r.typeId);
-    const eligible = membersWithRole(team === 'video' ? 'video' : 'design');
+    const eligible = membersWithRole(assignRoleFor(team));
     const suggested = ty && ty.goesTo ? eligible.find((m) => lower(ty.goesTo).includes(lower(m.name))) : null; const current = assigneeOf(r);
     const w0 = workStage(r); const taskTat = !!(w0 && w0.slaFrom === 'task');
     const sla = stages(r).filter((s) => s.kind === 'work' && s.slaHours > 0).map((s) => `${esc(s.name)} ${s.slaHours}h`).join(' · ');
@@ -1294,7 +1312,7 @@ function actionPanelHtml(r) {
   }
   if (st.kind === 'work') {
     const a = (r.assignees || {})[st.id]; const s = slaState(r); const team = teamOf(r);
-    const eligible = membersWithRole(team === 'video' ? 'video' : 'design');
+    const eligible = membersWithRole(assignRole(r));
     const stageFiles = (r.deliverables || []).filter((d) => d.round === r.round && (!d.stage || d.stage === st.id));
     const needFile = st.needsFile && !stageFiles.length;
     const nx = nextStage(st.id, r); const skip = st.skipTo ? stageById(st.skipTo) : null;
@@ -1312,16 +1330,16 @@ function actionPanelHtml(r) {
     </div>`;
   }
   if (st.kind === 'review') {
-    const nx = nextStage(st.id); const isFinal = nx && nx.kind === 'end';
+    const nx = nextStage(st.id, r); const isFinal = nx && nx.kind === 'end';
     const who = (st.reviewers || []).map((sp) => reviewerLabel(sp, r)); const latest = (r.deliverables || []).filter((d) => d.round === r.round);
     if (!canReview(r, st)) return `<div class="action-panel review"><div class="row between wrap"><h3>Waiting for ${esc(who.join(' or '))} — ${esc(st.name.toLowerCase())}</h3>${lim}</div><p class="small muted">Round ${r.round || 1}. ${latest.length ? plural(latest.length, 'file link') + ' submitted for this round.' : 'No file link on this round.'}</p></div>`;
     const backTo = stages(r).find((x) => x.id === st.editsTo);
     return `<div class="action-panel review"><div class="row between wrap"><h3>${st.uploads ? esc(st.name) : isFinal ? 'Your final approval' : 'Your QC'}${(r.round || 1) > 1 ? ` · round ${r.round}` : ''}</h3>${lim}</div>
-      ${st.uploads ? `<p class="small muted">Check the final file. If it passes, upload it and paste the link — that marks the request <b>${esc(nx.name)}</b> and tells ${esc(firstName(r.requester))}. If it needs changes, send it back to ${esc(backTo ? backTo.name : 'the editor')} with notes (round ${(r.round || 1) + 1}).</p>`
+      ${st.uploads ? `<p class="small muted">Check the final file. If it passes, upload it and paste the link — that ${nx.kind === 'end' ? `marks the request <b>${esc(nx.name)}</b> and tells ${esc(firstName(r.requester))}` : `sends it to <b>${esc(nx.name)}</b> with ${esc((nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or '))}`}. If it needs changes, send it back to ${esc(backTo ? backTo.name : 'the editor')} with notes (round ${(r.round || 1) + 1}).</p>`
         : isFinal ? `<p class="small muted">Either ${esc(who.join(' or '))} can approve — the first one to act closes the task and records ${esc(assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the')} TAT.</p>`
         : `<p class="small muted">Check the work against the brief. Approve to send it to ${esc((nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or '))} for final approval, or send it back for rework.</p>`}
       ${latest.length ? `<div class="stack" style="gap:6px">${latest.map((d) => `<div class="deliverable">${ic('link', 'sm')}<a href="${attr(d.url)}" target="_blank" rel="noopener">${esc(d.label)}</a>${ic('external', 'sm')}</div>`).join('')}</div>` : '<p class="small muted">No file link was added on this round — ask for it in the thread or send it back.</p>'}
-      <form data-form="review" class="stack" style="gap:8px">${st.uploads ? `<div class="field"><label for="up-link">Link to the uploaded file</label><input class="input sm" id="up-link" name="upload" type="url" placeholder="https://… (YouTube, Drive, the scheduled post)"></div>` : ''}<textarea class="input" name="note" placeholder="Notes for the team — required when sending it back" rows="3"></textarea><div class="actions"><button class="btn good" data-review="approve" type="button">${ic('check', 'sm')}${st.uploads ? 'Uploaded — mark ' + esc(nx.name) : 'Approve'}</button><button class="btn" data-review="edits" type="button">${ic('rotate', 'sm')}${st.uploads || !isFinal ? 'Send back for rework' : 'Request changes'}</button></div></form></div>`;
+      <form data-form="review" class="stack" style="gap:8px">${st.uploads ? `<div class="field"><label for="up-link">Link to the uploaded file</label><input class="input sm" id="up-link" name="upload" type="url" placeholder="https://… (YouTube, Drive, the scheduled post)"></div>` : ''}<textarea class="input" name="note" placeholder="Notes for the team — required when sending it back" rows="3"></textarea><div class="actions"><button class="btn good" data-review="approve" type="button">${ic('check', 'sm')}${st.uploads ? 'Uploaded — send to ' + esc(nx.name) : 'Approve'}</button><button class="btn" data-review="edits" type="button">${ic('rotate', 'sm')}${st.uploads || !isFinal ? 'Send back for rework' : 'Request changes'}</button></div></form></div>`;
   }
   return '';
 }
@@ -1567,7 +1585,7 @@ document.addEventListener('click', async (e) => {
   const modeEl = e.target.closest('[data-mode]'); if (modeEl) { S.boardMode = modeEl.dataset.mode; localStorage.setItem(LS.boardMode, S.boardMode); renderPage(false); return; }
   const tog = e.target.closest('[data-toggle]'); if (tog) { S.filters[tog.dataset.toggle] = !S.filters[tog.dataset.toggle]; renderPage(false); return; }
   const sortEl = e.target.closest('[data-sort]'); if (sortEl) { const k = sortEl.dataset.sort; if (S.sort.key === k) S.sort.dir = S.sort.dir === 'asc' ? 'desc' : 'asc'; else S.sort = { key: k, dir: ['title', 'assignee', 'type'].includes(k) ? 'asc' : 'desc' }; renderPage(false); return; }
-  const revEl = e.target.closest('[data-review]'); if (revEl) { const form = revEl.closest('form'); const note = form.querySelector('[name=note]').value.trim(); const upEl = form.querySelector('[name=upload]'); const upload = upEl ? upEl.value.trim() : ''; const id = S.drawer; const r = getReq(id); const st = currentStage(r); const nx = nextStage(st.id, r); const isFinal = nx && nx.kind === 'end'; if (revEl.dataset.review === 'approve') { if (st.uploads && !isUrl(upload)) { toast('Paste the link to the uploaded file first.', 'crit'); if (upEl) upEl.focus(); return; } if (!(await confirmBox({ title: isFinal ? (st.uploads ? `Mark ${nx.name}?` : 'Give final approval?') : `Pass ${st.name}?`, sub: isFinal ? `The task closes, ${esc(firstName(r.requester))} is notified and ${assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the'} turnaround is recorded.` : `It goes to ${(nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or ')} for final approval.`, confirm: isFinal && st.uploads ? 'Mark delivered' : 'Approve' }))) return; await actApprove(id, note, upload); } else { if (!note) { toast('Tell the team what to change first.', 'crit'); form.querySelector('[name=note]').focus(); return; } await actRequestEdits(id, note); } return; }
+  const revEl = e.target.closest('[data-review]'); if (revEl) { const form = revEl.closest('form'); const note = form.querySelector('[name=note]').value.trim(); const upEl = form.querySelector('[name=upload]'); const upload = upEl ? upEl.value.trim() : ''; const id = S.drawer; const r = getReq(id); const st = currentStage(r); const nx = nextStage(st.id, r); const isFinal = nx && nx.kind === 'end'; if (revEl.dataset.review === 'approve') { if (st.uploads && !isUrl(upload)) { toast('Paste the link to the uploaded file first.', 'crit'); if (upEl) upEl.focus(); return; } if (!(await confirmBox({ title: isFinal ? (st.uploads ? `Mark ${nx.name}?` : 'Give final approval?') : `Pass ${st.name}?`, sub: isFinal ? `The task closes, ${esc(firstName(r.requester))} is notified and ${assigneeOf(r) ? assigneeOf(r).name + "'s" : 'the'} turnaround is recorded.` : `It goes to ${(nx.reviewers || []).map((sp) => reviewerLabel(sp, r)).join(' or ')} for final approval.`, confirm: st.uploads ? (isFinal ? 'Mark delivered' : 'Pass QC') : 'Approve' }))) return; await actApprove(id, note, upload); } else { if (!note) { toast('Tell the team what to change first.', 'crit'); form.querySelector('[name=note]').focus(); return; } await actRequestEdits(id, note); } return; }
   const act = e.target.closest('[data-action]'); if (!act) return;
   if (act.classList.contains('overlay') || act.classList.contains('modal-wrap')) { if (e.target !== act) return; }
   const a = act.dataset.action; const id = act.dataset.id || S.drawer;
@@ -1595,7 +1613,7 @@ document.addEventListener('click', async (e) => {
     case 'stage-up': case 'stage-down': { const sts = S.flowDraft.teams[act.dataset.team]; const i = Number(act.dataset.i); const j = a === 'stage-up' ? i - 1 : i + 1; [sts[i], sts[j]] = [sts[j], sts[i]]; renderPage(false); break; }
     case 'stage-del': { const sts = S.flowDraft.teams[act.dataset.team]; const s = sts[Number(act.dataset.i)]; if (await confirmBox({ title: `Remove the ${s.name} stage?`, sub: 'Past timing data for this stage stays on old tasks.', confirm: 'Remove', danger: true })) { sts.splice(Number(act.dataset.i), 1); sts.forEach((x) => { if (x.editsTo === s.id) x.editsTo = (sts.find((y) => y.kind === 'work') || {}).id || ''; if (x.skipTo === s.id) delete x.skipTo; }); renderPage(false); } break; }
     case 'reset-flow': S.flowDraft = clone(S.flow); renderPage(false); toast('Changes discarded', 'info'); break;
-    case 'save-flow': { const f = clone(S.flowDraft); for (const t of TEAM_IDS) { const err = validateFlow(f.teams[t], teamName(t)); if (err) return toast(err, 'crit'); } await saveFlow(f); S.flowDraft = clone(S.flow); renderPage(false); break; }
+    case 'save-flow': { const f = clone(S.flowDraft); for (const t of Object.keys(f.teams)) { const err = validateFlow(f.teams[t], teamName(t)); if (err) return toast(err, 'crit'); } await saveFlow(f); S.flowDraft = clone(S.flow); renderPage(false); break; }
     case 'toggle-wh': S.settingsDraft.workHours.enabled = !S.settingsDraft.workHours.enabled; renderPage(false); break;
     case 'toggle-notify': S.settingsDraft.notifications = { ...(S.settingsDraft.notifications || {}), enabled: !(S.settingsDraft.notifications && S.settingsDraft.notifications.enabled !== false) }; renderPage(false); break;
     case 'add-type': S.settingsDraft.types.push({ id: 'type-' + uid().slice(0, 5), name: '', team: 'design', tatHours: 72, from: '', goesTo: '' }); renderPage(false); setTimeout(() => { const last = $$('[data-ty="name"]').pop(); if (last) last.focus(); }, 0); break;
@@ -1686,10 +1704,10 @@ window.addEventListener('hashchange', () => { const before = S.route.view; readR
 function normalizeFlow(doc) {
   const f = { version: (doc && doc.version) || 1, updatedAt: doc && doc.updatedAt, updatedBy: doc && doc.updatedBy, teams: {} };
   const src = (doc && doc.teams) || {};
-  TEAM_IDS.forEach((t) => {
+  [...new Set([...TEAM_IDS, ...Object.keys(src)])].forEach((t) => {
     let sts = Array.isArray(src[t]) ? src[t] : null;
     if (!sts && t === 'design' && Array.isArray(doc && doc.stages) && doc.stages.length) sts = doc.stages;   // pre-teams document
-    f.teams[t] = (sts && sts.length && sts.some((s) => s.kind === 'triage')) ? clone(sts) : clone(DEFAULT_FLOW.teams[t]);
+    f.teams[t] = (sts && sts.length && sts.some((s) => s.kind === 'triage')) ? clone(sts) : clone(DEFAULT_FLOW.teams[t] || DEFAULT_FLOW.teams.design);
     f.teams[t].forEach((s) => { s.phase = s.phase || (s.kind === 'start' ? 'intake' : s.kind === 'triage' ? 'brief' : s.kind === 'work' ? 'work' : s.kind === 'end' ? 'done' : 'qc'); });
   });
   return f;
@@ -1700,6 +1718,7 @@ function normalizeSettings(settings) {
   if (!Array.isArray(s.types) || !s.types.length) s.types = clone(DEFAULT_TYPES);
   s.types = s.types.map((t) => typeof t === 'string' ? { id: slug(t), name: t, team: 'design', tatHours: 72 } : { tatHours: 72, team: 'design', ...t, id: t.id || slug(t.name) });
   if (!Array.isArray(s.allowedDomains)) s.allowedDomains = clone(DEFAULT_SETTINGS.allowedDomains);
+  TEAM_IDS.forEach((t) => { if (!s.types.some((x) => x.team === t)) DEFAULT_TYPES.filter((d) => d.team === t).forEach((d) => s.types.push(clone(d))); });
   if (!Array.isArray(s.roles) || !s.roles.length) s.roles = clone(DEFAULT_ROLES);
   DEFAULT_ROLES.forEach((d) => { if (!s.roles.some((r) => r.id === d.id)) s.roles.push(clone(d)); });   // new built-in roles appear without a migration
   s.notifications = { enabled: true, ...((settings && settings.notifications) || {}) };

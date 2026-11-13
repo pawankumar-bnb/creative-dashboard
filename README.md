@@ -2,18 +2,18 @@
 
 A workflow app that moves the branding team's requests through their team's flow.
 
-**Graphic design**
+**Graphic design** and **Content** (same shape, different people)
 
 ```
-Requested → Brief & assign → In production → QC → Final approval → Approved
- (anyone)    (coordinator)     (designer)   (coord.)  (requester or admin)
+Requested → Brief & assign → In production / Writing → QC → Final approval → Approved
+ (anyone)    (coordinator)      (designer / writer)   (coord.)  (requester or admin)
 ```
 
 **Video editing**
 
 ```
-Requested → Brief received → Assigned → Shoot → First cut → Final edit → QC & upload → Delivered
- (anyone)     (video lead)   (editor, who stays on by default through the three edit stages)   (video lead uploads)
+Requested → Brief received → Assigned → Shoot → First cut → Final edit → QC & upload → Final approval → Delivered
+ (anyone)     (video lead)   (editor, who stays on by default through the three edit stages)  (lead uploads) (requester or admin)
 ```
 
 1. **Anyone with a @bricknbolt.com email** signs in and raises a request. The type decides the team, and the request goes to that team's lead — the coordinator for design, the video lead for video.

@@ -1,0 +1,30 @@
+-- ============================================================
+-- Creative Request Ops — content team + final approval for video (run once)
+--
+-- 1. Three flows now: graphic design unchanged, a content flow with the same
+--    stages (Sakshi briefs, a writer writes, Sakshi QCs, requester approves),
+--    and Final approval inserted between QC & upload and Delivered for video.
+-- 2. Dishika gets the Content writing role.
+-- 3. The content request types are added to settings, leaving the existing
+--    types and every other setting as they are.
+-- ============================================================
+
+insert into public.docs (collection, id, data) values ('config', 'flow', '{"version":5,"teams":{"design":[{"id":"intake","name":"Requested","kind":"start","role":"requester","slaHours":0,"phase":"intake","color":"#64748B"},{"id":"brief","name":"Brief & assign","kind":"triage","role":"coordinator","slaHours":24,"phase":"brief","color":"#1baf7a"},{"id":"production","name":"In production","kind":"work","role":"team","slaHours":0,"slaFrom":"task","needsFile":true,"phase":"work","color":"#4a3aa7"},{"id":"qc","name":"QC","kind":"review","reviewers":["role:coordinator"],"slaHours":24,"editsTo":"production","phase":"qc","color":"#eb6834"},{"id":"approval","name":"Final approval","kind":"review","reviewers":["requester","role:admin"],"slaHours":24,"editsTo":"production","phase":"approval","color":"#2a78d6"},{"id":"done","name":"Approved","kind":"end","role":"","slaHours":0,"phase":"done","color":"#0ca30c"}],"content":[{"id":"c-intake","name":"Requested","kind":"start","role":"requester","slaHours":0,"phase":"intake","color":"#64748B"},{"id":"c-brief","name":"Brief & assign","kind":"triage","role":"coordinator","slaHours":24,"phase":"brief","color":"#1baf7a"},{"id":"c-writing","name":"Writing","kind":"work","role":"content","slaHours":0,"slaFrom":"task","needsFile":true,"fileLabel":"draft link","nextLabel":"Ready for QC","phase":"work","color":"#C11574"},{"id":"c-qc","name":"QC","kind":"review","reviewers":["role:coordinator"],"slaHours":24,"editsTo":"c-writing","phase":"qc","color":"#eb6834"},{"id":"c-approval","name":"Final approval","kind":"review","reviewers":["requester","role:admin"],"slaHours":24,"editsTo":"c-writing","phase":"approval","color":"#2a78d6"},{"id":"c-done","name":"Approved","kind":"end","role":"","slaHours":0,"phase":"done","color":"#0ca30c"}],"video":[{"id":"v-intake","name":"Requested","kind":"start","role":"requester","slaHours":0,"phase":"intake","color":"#64748B"},{"id":"v-brief","name":"Brief received","kind":"triage","role":"videolead","slaHours":12,"phase":"brief","color":"#1baf7a"},{"id":"v-assigned","name":"Assigned","kind":"work","role":"video","slaHours":12,"phase":"work","color":"#64748B","step":"start","skipTo":"v-firstcut","skipLabel":"No shoot needed","nextLabel":"Start shoot"},{"id":"v-shoot","name":"Shoot","kind":"work","role":"video","slaHours":48,"phase":"work","color":"#4a3aa7","needsFile":true,"fileLabel":"footage link","nextLabel":"Shoot done"},{"id":"v-firstcut","name":"First cut","kind":"work","role":"video","slaHours":48,"phase":"work","color":"#e87ba4","needsFile":true,"fileLabel":"first-cut link","nextLabel":"First cut ready"},{"id":"v-final","name":"Final edit","kind":"work","role":"video","slaHours":24,"phase":"work","color":"#2a78d6","needsFile":true,"fileLabel":"final file link","nextLabel":"Ready for QC"},{"id":"v-qc","name":"QC & upload","kind":"review","reviewers":["role:videolead"],"slaHours":24,"editsTo":"v-final","phase":"qc","uploads":true,"color":"#eb6834"},{"id":"v-approval","name":"Final approval","kind":"review","reviewers":["requester","role:admin"],"slaHours":24,"editsTo":"v-final","phase":"approval","color":"#2a78d6"},{"id":"v-done","name":"Delivered","kind":"end","role":"","slaHours":0,"phase":"done","color":"#0ca30c"}]}}'::jsonb)
+on conflict (collection, id) do update set data = excluded.data;
+
+update public.docs set data = jsonb_set(data, '{roles}', (
+    select jsonb_agg(distinct r) from jsonb_array_elements(coalesce(data -> 'roles', '[]'::jsonb) || '["content"]'::jsonb) r))
+  where collection = 'members' and id = 'dishika.shukla@bricknbolt.com';
+
+-- add only the content types that are not there yet
+update public.docs set data = jsonb_set(data, '{types}',
+    coalesce(data -> 'types', '[]'::jsonb) || (
+      select coalesce(jsonb_agg(t), '[]'::jsonb) from jsonb_array_elements('[{"id":"scripts","name":"Scripts & pointers","team":"content","tatHours":48,"from":"Abhinav / Sakshi","goesTo":"Dishika","note":"2 days"},{"id":"copy-social","name":"Social media copy","team":"content","tatHours":24,"from":"Sakshi / Dishika","goesTo":"Dishika","note":"1 day"},{"id":"copy-ads","name":"Ad & performance copy","team":"content","tatHours":24,"from":"Abhinav","goesTo":"Dishika","note":"1 day"},{"id":"blog","name":"Blog / long-form article","team":"content","tatHours":96,"from":"Marketing","goesTo":"Dishika","note":"3–4 days"}]'::jsonb) t
+      where not exists (select 1 from jsonb_array_elements(coalesce(data -> 'types', '[]'::jsonb)) e where e ->> 'id' = t ->> 'id')))
+  where collection = 'config' and id = 'settings';
+
+select 'teams' as what, (select string_agg(k, ', ') from jsonb_object_keys(data -> 'teams') k) as detail from public.docs where collection='config' and id='flow'
+union all select 'video flow', (select string_agg(s ->> 'name', ' → ' order by ord) from jsonb_array_elements((select data->'teams'->'video' from public.docs where collection='config' and id='flow')) with ordinality e(s, ord))
+union all select 'content flow', (select string_agg(s ->> 'name', ' → ' order by ord) from jsonb_array_elements((select data->'teams'->'content' from public.docs where collection='config' and id='flow')) with ordinality e(s, ord))
+union all select 'content types', (select string_agg(t ->> 'name', ', ') from jsonb_array_elements((select data->'types' from public.docs where collection='config' and id='settings')) t where t->>'team'='content')
+union all select 'writers', (select string_agg(d.data ->> 'name', ', ') from public.docs d where d.collection='members' and (d.data->'roles') ? 'content');
